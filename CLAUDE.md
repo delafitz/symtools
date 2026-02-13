@@ -106,20 +106,16 @@ All routes defined in `app/server/router.py`:
 - `/quote` - Real-time quote (with session fields for pre/post/closed)
 - `/hist` - Historical OHLCV bars with per-scale stats
 - `/baskets` - Cached basket optimizations
-- `/optimize` - SSE: re-run optimization with custom params, streams baskets + hists
+- `/optimize` - No-op stub (disabled)
 - `/cost` - Transaction cost calculations (slippage, xADV)
 
 ### Basket Optimization
 
 **BasketParams** (`app/models/baskets.py`):
-- `max_budget`: float = 0.5 (max total weight)
+- `max_budget`: float = 0.2 (max total weight)
 - `threshold_long`: float = 0.10 (min weight for inclusion)
-- `cardinality`: int = 5 (max non-zero weights)
+- `cardinality`: int = 4 (max non-zero weights)
 - `l1_coef`: float = 1e-5 (L1 regularization)
-
-**`/optimize` endpoint**: `GET /optimize?symbol=AAPL&basket_type=indices&max_budget=0.6`
-- Re-runs optimization for specified `basket_type` ('indices' | 'all_factors')
-- Streams SSE events: `baskets` (updated), `hist` (per template with new tracking)
 
 ### PriceService (`app/services/prices.py`)
 
@@ -180,8 +176,9 @@ When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merge
 1. For each scenario, join basket symbol closes from unified `cache.hists` to symbol hist on date/timestamp
 2. Forward-fill + backward-fill nulls
 3. Compute pct_change per basket symbol
-4. Weighted average return per bar → emitted as `basket_hist` events
-5. Series is rebased against `prev_close` from hist stats, so first bar has a non-zero return
+4. Weighted average return per bar → returns `TrackingResult(series, scenarios)`
+5. `build_basket_hists` splits into `BasketHist` per scenario with per-scale `stats` (dates from parent, `end_price`/`range_pct_return` cumulated from bar returns, `range_vwap` = null)
+6. Series is rebased against `prev_close` from hist stats, so first bar has a non-zero return
 
 **Timestamp Alignment**: Intraday timestamps rounded to bar boundaries (`round_ts` in `app/utils/dates.py`) for consistent joins across symbols.
 
@@ -199,26 +196,35 @@ When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merge
 - Quote style: single quotes
 - Uses Polars for DataFrame operations (some Pandas in legacy paths)
 
-## Known Gaps
+### Service Return Types
 
-### Missing Type Hints
+Services return Pydantic models directly — no `model_validate` at call sites:
+- `build_analytics()` → `SymbolAnalytics`
+- `fetch_quote()` → `SymbolQuote`
+- `calc_costs()` → `SymbolCostCalcs | None`
+- `BasketService.build/get()` → `SymbolBaskets | None`
+- `cache.search_token()` → `list[SearchResult]`
+- `cache.get_analytics()` → `SymbolAnalytics | None`
+- `cache.get_quote()` → `SymbolQuote`
+- `cache.get_costs()` → `SymbolCostCalcs | None`
+- `cache.get_baskets()` → `SymbolBaskets | None`
 
-Most functions in `app/services/` and `app/mds/` lack parameter and return type annotations:
-- `app/services/snapshot/basket/risk.py` - all functions untyped
-- `app/services/snapshot/basket/scenarios.py` - all functions untyped
-- `app/services/cost.py` - `get_discount(shares, adv, vol)` has no types
-- `app/server/cache.py` - most methods missing `symbol: str` and return types
+The basket pipeline passes `SymbolBaskets`/`Basket` models end-to-end (builder → service → cache → stream → tracking). `calc_stats()` in `baskets/risk.py` returns a dict internally; `Basket.model_validate()` happens in `builder.py`.
 
-### Raw Dicts Should Be Pydantic Models
+### SSE Serialization
 
-These functions return dicts when Pydantic models already exist:
-- `build_snapshot()` in `services/snapshot/build.py` → should return `SymbolSnap`
-- `calc_stats()` in `services/snapshot/basket/risk.py` → should return `Basket`
-- `calc_costs()` in `services/cost.py` → should return `SymbolCostCalcs`
-- `fetch_quote()` in `mds/quote.py` → should return `SymbolQuote`
-- `search_token()` in `server/cache.py` → should return `list[SearchResult]`
-- `get_refs()` / `get_ref()` in `server/cache.py` → should return `list[RefData]` / `RefData`
+SSE events use `model_dump(by_alias=True)` → camelCase, matching REST endpoint serialization. All models use `config()` with `serialization_alias=to_camel`.
 
 ### Cache Type Annotation
 
-The `Cache` class in `app/server/cache.py` is passed as an untyped `cache` parameter throughout services. Add a type alias or import consistently.
+`Cache` is imported via `TYPE_CHECKING` in services that accept it (e.g. `cost.py`, `stream.py`). `get_ref()` / `get_refs()` still return dicts (RefData model lacks fields present in tickers fallback).
+
+## Known Gaps
+
+### Remaining Untyped Functions
+
+- `app/utils/trie.py` - `insert()`, `prefix_search()` lack types
+- `app/utils/corp.py` - `strip_name()` lacks types
+- `app/utils/timing.py` - `timeit()` decorator lacks types
+- `app/mds/refs.py` - `list_tickers()`, `fetch_ticker_details()` partial types
+- `app/server/cache.py` - `get_refs()` → `list[dict]`, `get_ref()` → `dict | None` (not yet models)
