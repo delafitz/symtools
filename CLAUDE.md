@@ -33,7 +33,7 @@ Symtools is a FastAPI-based financial analytics server providing portfolio optim
 - `app/services/` - Business logic (prices, refs, hist, cost, baskets/)
 - `app/models/` - Pydantic request/response models
 - `app/mds/` - Market data service (Polygon API client wrapper)
-- `app/utils/` - Helpers (store.py for parquet caching, trie.py for symbol search, etfs.py for predefined baskets)
+- `app/utils/` - Helpers (store.py for parquet caching, trie.py for symbol search, groups.py for ETF lists and scenario defs)
 - `data/` - Parquet cache files (date-stamped: `*.YYYYMMDD.parquet`)
 
 ### Core Data Flow
@@ -81,27 +81,25 @@ Runs 4 phases sequentially, each using the shared semaphore for concurrent API c
 
 **Key Functions** (`app/services/refs.py`):
 - `load_refs_async()` - Main startup loader, orchestrates all phases
-- `load_baskets_async()` - Standalone basket loader (used when refs cached)
 
-**Callbacks**:
-- `on_update(refs)` - Updates `cache.refs` and rebuilds Trie
-- `on_hist_update(symbol, template, hist)` - Populates `cache.symbol_hists`
-- `on_basket_update(group, template, hists)` - Populates `cache.basket_hists`
+**Callbacks** (defined in `cache.py:_load_refs_background`):
+- `on_refs_update(refs)` - Updates `cache.refs` and rebuilds Trie
+- `on_hists_update(hists)` - Updates unified `cache.hists` DataFrame
 
 ### Key Patterns
 
 - **Pydantic models with formatting metadata** - Uses `Fmt` enum and `fp()` decorator in `app/utils/models.py` to attach display hints (valueFormat, metaLabel) for UI rendering
 - **Parquet caching** - `app/utils/store.py` handles date-stamped file persistence with zstd compression:
   - `refs.YYYYMMDD.parquet` - Reference data (symbol, name, mkt_cap, free_float, etc.)
-  - `hists_{template}.YYYYMMDD.parquet` - Combined symbol hists with `symbol` column
-  - `{group}_{template}.YYYYMMDD.parquet` - Basket hists (indices_Y, factors_M, etc.)
-- **Async services** - All endpoint handlers are async; services return Polars DataFrames
+  - `hists.YYYYMMDD.parquet` - Unified symbol hists with `symbol`/`template` columns
+  - `baskets.YYYYMMDD.parquet` - Cached optimizer weights (symbol, scenario, hedge_symbol, weight)
+- **Async services** - All endpoint handlers are async; services return Pydantic models or Polars DataFrames
 
 ### API Endpoints
 
 All routes defined in `app/server/router.py`:
 - `/search` - Symbol prefix search via Trie
-- `/refs` - Security reference data (symbol, exch, name, curr, sic, shares_out, mkt_cap, free_float, free_float_pct)
+- `/refs` - Security reference data (symbol, exch, name, curr, sic, shares_out, mkt_cap)
 - `/snapshot` - SSE: streams quote, hist (Y/M/W/D), analytics, baskets, basket_hist. See `docs/snapshot-sse.md`.
 - `/quote` - Real-time quote (with session fields for pre/post/closed)
 - `/hist` - Historical OHLCV bars with per-scale stats
