@@ -1,0 +1,15 @@
+services: return Pydantic models, add types, consistent camelCase SSE
+
+- Services return models directly (SymbolAnalytics, SymbolQuote,
+  SymbolCostCalcs, SymbolBaskets, SearchResult) instead of raw dicts
+- Remove scattered model_validate calls in stream.py and router.py
+- Basket pipeline passes SymbolBaskets/Basket models end-to-end
+  (builder → service → cache → stream → tracking)
+- Add TrackingResult dataclass for compute_tracking_for_template
+- Add HistStats to BasketHist for per-scale tracking overlays
+- Type annotate cost.py, risk.py, window.py, cache.py methods
+- Fix SSE serialization: model_dump(by_alias=True) for camelCase
+- Replace print() with logger in mds/refs.py
+- Guard empty bars in _basket_stats
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

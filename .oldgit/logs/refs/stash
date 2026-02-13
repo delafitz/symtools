@@ -1,0 +1,1 @@
+0000000000000000000000000000000000000000 a5a2f1711e1b77d4fed9c5c2fc6550e672f0ecaa Dennis Fitzgerald <delafitz@pm.me> 1770951106 -0500	WIP on main: 38d3eaf services: return Pydantic models, add types, consistent camelCase SSE

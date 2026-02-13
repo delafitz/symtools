@@ -1,0 +1,224 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Build and Run Commands
+
+```bash
+# Run development server
+uv run fastapi dev app/main.py
+
+# Format code
+uv run ruff format
+
+# Lint code
+uv run ruff check
+
+# Type check
+uv run basedpyright
+```
+
+## Environment Variables
+
+- `POLYGON_API_KEY` - Required for market data access via Polygon.io API
+
+## Architecture Overview
+
+Symtools is a FastAPI-based financial analytics server providing portfolio optimization and risk analysis for block trading.
+
+### Directory Structure
+
+- `app/main.py` - FastAPI application entry point
+- `app/server/` - HTTP layer (router.py endpoints, cache.py in-memory storage)
+- `app/services/` - Business logic (prices, refs, hist, cost, baskets/)
+- `app/models/` - Pydantic request/response models
+- `app/mds/` - Market data service (Polygon API client wrapper)
+- `app/utils/` - Helpers (store.py for parquet caching, trie.py for symbol search, etfs.py for predefined baskets)
+- `data/` - Parquet cache files (date-stamped: `*.YYYYMMDD.parquet`)
+
+### Core Data Flow
+
+1. **Startup** - Async loading with concurrency pool (see Startup Architecture below)
+2. **Symbol snapshot** (`/snapshot`) - SSE stream via `stream_symbol()`. Fires quote, PriceService, and analytics in parallel; yields events as they resolve. See `docs/snapshot-sse.md`.
+3. **Hedge optimization** - Uses scikit-folio MeanRisk optimizer with SCIP solver against four scenario sets:
+   - `indices`: SPY, QQQ, IWM
+   - `factors`: sector/factor ETFs (XLK, XLF, SOXX, etc.)
+   - `singles`: factor-screened individual stocks
+   - `combined`: all of the above
+
+### Startup Architecture
+
+On startup, the server loads reference data and pre-fetches historical data using an async pool with semaphore-based concurrency (`CONCURRENCY = 15` in `app/services/refs.py`).
+
+**Cached Startup** (refs parquet exists):
+- Load refs from `data/refs.YYYYMMDD.parquet`
+- Load basket hists from cache
+- Background task loads any missing baskets
+
+**Fresh Startup** (no refs cache):
+Runs 4 phases sequentially, each using the shared semaphore for concurrent API calls:
+
+| Phase | Description | Cache File | Progress Log |
+|-------|-------------|------------|--------------|
+| 1. Details | Fetch ticker details, filter by mkt_cap >= $1B | `refs.parquet` | every 50 |
+| 2. Floats | Fetch free float data for filtered refs | (in refs) | every 50 |
+| 3. Hists | Prefetch Y template for top 1000 by mkt_cap | `hists_Y.parquet` | every 50 |
+| 4. Baskets | Load basket hists for all groups/templates | `{group}_{template}.parquet` | every 4 |
+
+**Startup Summary** (logged as Polars table in yellow):
+```
+┌─────────┬───────┬─────────┐
+│ phase   ┆ count ┆ seconds │
+├─────────┼───────┼─────────┤
+│ tickers │ 2000  │ 0.0     │
+│ details │ 1500  │ 120.0   │
+│ floats  │ 1200  │ 90.0    │
+│ hists   │ 1000  │ 150.0   │
+│ baskets │ 8     │ 45.0    │
+│ total   │ 1500  │ 405.0   │
+└─────────┴───────┴─────────┘
+```
+
+**Key Functions** (`app/services/refs.py`):
+- `load_refs_async()` - Main startup loader, orchestrates all phases
+- `load_baskets_async()` - Standalone basket loader (used when refs cached)
+
+**Callbacks**:
+- `on_update(refs)` - Updates `cache.refs` and rebuilds Trie
+- `on_hist_update(symbol, template, hist)` - Populates `cache.symbol_hists`
+- `on_basket_update(group, template, hists)` - Populates `cache.basket_hists`
+
+### Key Patterns
+
+- **Pydantic models with formatting metadata** - Uses `Fmt` enum and `fp()` decorator in `app/utils/models.py` to attach display hints (valueFormat, metaLabel) for UI rendering
+- **Parquet caching** - `app/utils/store.py` handles date-stamped file persistence with zstd compression:
+  - `refs.YYYYMMDD.parquet` - Reference data (symbol, name, mkt_cap, free_float, etc.)
+  - `hists_{template}.YYYYMMDD.parquet` - Combined symbol hists with `symbol` column
+  - `{group}_{template}.YYYYMMDD.parquet` - Basket hists (indices_Y, factors_M, etc.)
+- **Async services** - All endpoint handlers are async; services return Polars DataFrames
+
+### API Endpoints
+
+All routes defined in `app/server/router.py`:
+- `/search` - Symbol prefix search via Trie
+- `/refs` - Security reference data (symbol, exch, name, curr, sic, shares_out, mkt_cap, free_float, free_float_pct)
+- `/snapshot` - SSE: streams quote, hist (Y/M/W/D), analytics, baskets, basket_hist. See `docs/snapshot-sse.md`.
+- `/quote` - Real-time quote (with session fields for pre/post/closed)
+- `/hist` - Historical OHLCV bars with per-scale stats
+- `/baskets` - Cached basket optimizations
+- `/optimize` - SSE: re-run optimization with custom params, streams baskets + hists
+- `/cost` - Transaction cost calculations (slippage, xADV)
+
+### Basket Optimization
+
+**BasketParams** (`app/models/baskets.py`):
+- `max_budget`: float = 0.5 (max total weight)
+- `threshold_long`: float = 0.10 (min weight for inclusion)
+- `cardinality`: int = 5 (max non-zero weights)
+- `l1_coef`: float = 1e-5 (L1 regularization)
+
+**`/optimize` endpoint**: `GET /optimize?symbol=AAPL&basket_type=indices&max_budget=0.6`
+- Re-runs optimization for specified `basket_type` ('indices' | 'all_factors')
+- Streams SSE events: `baskets` (updated), `hist` (per template with new tracking)
+
+### PriceService (`app/services/prices.py`)
+
+Owns daily (Y) hist data, template routing, SymbolHist response building, and price lookups. Single entry point for all hist-related operations during a snapshot or `/hist` request.
+
+**Factory**: `PriceService.create(cache, symbol)` — async classmethod that loads Y hist from cache, constructs the service, and refreshes stale data if needed. Returns `None` if no Y data exists.
+
+**Template routing** via `prices.hist(symbol, template)`:
+- `Y` → stored daily bars (`self._daily`)
+- `M` → sliced from Y (`slice_hist(daily, 'months', 6)`) — no separate API fetch
+- `W`/`D` → delegated to `cache.get_hist_async`
+
+**Response building**: `prices.build_response(symbol, template, scale)` → `SymbolHist`. Calls `hist()` then `_build_hist()` internally. Computes per-scale stats (1 through max_scale), daily_aggs for intraday, and bar data at max_scale resolution. Client slices visible bars via stats lookups.
+
+**Daily refresh**: On market hours, `needs_refresh` checks two conditions:
+1. Today's bar missing from `_daily` (data not yet available when loaded pre-open)
+2. `_loaded_at` older than `DAILY_DEFAULT_TTL` (300s / 5 min)
+
+When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merges into `_daily`, and recomputes `pct_return`.
+
+**Price lookups** (all operate on `_daily`):
+- `close(date_str)` — daily close for a date
+- `prev_close(before)` → `(prev_date, prev_close)` for last bar before a date
+- `vwap(start, end)` — volume-weighted avg price; caps range to available daily data so intraday end dates beyond the last daily bar still return a value
+- `daily_aggs(start, end)` — daily-bar slice for intraday overlay with prev close anchor
+- `end_price(end_str, hist)` — best end price: daily close → market-close bar → last bar
+
+### Hist Features
+
+**Templates** (`app/services/prices.py:HIST_TEMPLATES`):
+| Key | Timespan | Multiplier | Unit | Default Scale | Max Scale |
+|-----|----------|------------|------|---------------|-----------|
+| Y | day | 1 | years | 1 | 2 |
+| M | day | 1 | months | 3 | 6 |
+| W | minute | 30 | weeks | 2 | 4 |
+| D | minute | 10 | days | 5 | 10 |
+
+**Response** (`SymbolHist` in `app/models/hist.py`):
+- `stats`: `dict[int, HistStats]` keyed by scale (1 through max). Per-scale date range and return stats.
+- `daily_aggs`: Daily OHLCV bars covering the intraday range (for prior close/VWAP). `null` for daily templates.
+- `bars`: OHLCV bars at template resolution with `pct_return` (bar-over-bar).
+
+**HistStats** — per-scale range metadata:
+- `end_date` / `end_price`: Session-aware end of range. Shared across all scales.
+- `start_date`: First trading day in range (inclusive). For intraday: clock-driven (N trading days back from end). For daily: from actual bar data.
+- `prev_date` / `prev_close`: Trading day before start. Anchors return calculation.
+- `range_vwap`: Volume-weighted avg price from start to end (from daily data).
+- `range_pct_return`: `end_price / prev_close - 1`.
+
+**Intraday stats date logic** (`PriceService._intraday_end`):
+- `end_date` = today if market has opened (>= 9:30 AM ET), else prior trading day
+- `end_price` = daily close from Y hist, or market close bar as fallback
+- `start_date` = `weekdays_back(end, scale - 1)` for D, `weekdays_back(end, scale * 5 - 1)` for W
+- `prev_date` = `prev_weekday(start_date)`
+- Bar data may include pre-session bars beyond `end_date`; stats reflect finalized daily closes.
+
+**Basket Tracking** (`app/services/tracking.py:compute_tracking_for_template`):
+1. For each scenario, join basket symbol closes from unified `cache.hists` to symbol hist on date/timestamp
+2. Forward-fill + backward-fill nulls
+3. Compute pct_change per basket symbol
+4. Weighted average return per bar → emitted as `basket_hist` events
+5. Series is rebased against `prev_close` from hist stats, so first bar has a non-zero return
+
+**Timestamp Alignment**: Intraday timestamps rounded to bar boundaries (`round_ts` in `app/utils/dates.py`) for consistent joins across symbols.
+
+**Cache** (`app/server/cache.py`):
+- Unified hists: `self.hists` — single Polars DataFrame with `symbol`/`template` columns, all templates concatenated
+- `get_hist(symbol, template)` — sync, filters unified hists, drops metadata columns
+- `get_hist_async(symbol, template)` — async, fetches from API if not cached, adds to unified hists
+- Parquet: `data/hists.YYYYMMDD.parquet` — persisted on startup, loaded on cached startup
+- Baskets: `data/baskets.YYYYMMDD.parquet` — cached optimizer weights, rebuilt on load
+- During snapshot stream, M/W/D hists for basket constituent symbols (singles) are fetched on-demand if not already cached
+
+## Code Style
+
+- Line length: 70 characters
+- Quote style: single quotes
+- Uses Polars for DataFrame operations (some Pandas in legacy paths)
+
+## Known Gaps
+
+### Missing Type Hints
+
+Most functions in `app/services/` and `app/mds/` lack parameter and return type annotations:
+- `app/services/snapshot/basket/risk.py` - all functions untyped
+- `app/services/snapshot/basket/scenarios.py` - all functions untyped
+- `app/services/cost.py` - `get_discount(shares, adv, vol)` has no types
+- `app/server/cache.py` - most methods missing `symbol: str` and return types
+
+### Raw Dicts Should Be Pydantic Models
+
+These functions return dicts when Pydantic models already exist:
+- `build_snapshot()` in `services/snapshot/build.py` → should return `SymbolSnap`
+- `calc_stats()` in `services/snapshot/basket/risk.py` → should return `Basket`
+- `calc_costs()` in `services/cost.py` → should return `SymbolCostCalcs`
+- `fetch_quote()` in `mds/quote.py` → should return `SymbolQuote`
+- `search_token()` in `server/cache.py` → should return `list[SearchResult]`
+- `get_refs()` / `get_ref()` in `server/cache.py` → should return `list[RefData]` / `RefData`
+
+### Cache Type Annotation
+
+The `Cache` class in `app/server/cache.py` is passed as an untyped `cache` parameter throughout services. Add a type alias or import consistently.

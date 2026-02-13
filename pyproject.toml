@@ -1,0 +1,46 @@
+[project]
+name = "symtools"
+version = "0.1.0"
+description = "block api server"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cvxpy[scip]>=1.7.3",
+    "fastapi[standard]>=0.120.2",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
+    "polars>=1.34.0",
+    "poldantic>=0.3.1",
+    "polygon-api-client>=1.16.2",
+    "pyarrow>=22.0.0",
+    "pydantic>=2.12.3",
+    "pydantic-to-typescript>=2.0.0",
+    "skfolio>=0.14.2",
+]
+
+[project.scripts]
+dev = "fastapi dev app.main --port 9500"
+# prod = "uvicorn app.main:app --host 0.0.0.0 --port 1234"
+
+# srv = "app.server:app"
+#
+# [build-system]
+# requires = ["uv_build"]
+# build-backend = "uv_build"
+#
+# [tool.uv.build-backend]
+# module-root = ""
+# module-name = "app"
+
+
+[tool.ruff]
+line-length = 70
+[tool.ruff.format]
+quote-style="single"
+
+
+[tool.basedpyright]
+reportMissingImports = "error"
+reportMissingTypeStubs = false
+typeCheckingMode = "off"
+

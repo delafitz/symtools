@@ -1,0 +1,417 @@
+from __future__ import annotations
+
+import polars as pl
+
+from app.mds.hist import (
+    HIST_TEMPLATE_DEFAULT,
+    HIST_TEMPLATES,
+)
+from app.services.baskets.factors import FactorModel
+from app.utils.market import slice_hist
+from app.utils.groups import (
+    FACTORS,
+    INDICES,
+    SCENARIOS,
+    SINGLES,
+    TYPE_ETF_FACTOR,
+    TYPE_ETF_INDEX,
+    TYPE_STOCK,
+)
+from app.utils.logger import get_logger
+
+log = get_logger(__name__)
+
+# ETF group returns cache: (group, template, scale) -> returns
+# Indices/factors returns are identical for all target symbols
+_etf_returns_cache: dict[tuple[str, str, int], pl.DataFrame] = {}
+
+# Minimum history length for optimizer input
+MIN_HIST = 250
+# Max singles to include after pre-screen
+MAX_SINGLES = 30
+# Pre-screen multiplier (factor distance pool before corr)
+PRESCREEN_MULT = 3
+# Composite score weights
+FACTOR_WEIGHT = 0.7
+CORR_WEIGHT = 0.3
+
+
+def get_returns(hists: pl.DataFrame) -> pl.DataFrame:
+    """Calculate returns from wide-format hist.
+
+    Input: date, [timestamp], sym1, sym2, ...
+    Output: date, sym1, sym2, ... (as pct changes)
+    """
+    cols = [
+        c
+        for c in hists.columns
+        if c == 'date' or c not in ('iso', 'timestamp', 'iso_right')
+    ]
+    return (
+        hists.select(cols)
+        .with_columns(pl.all().exclude('date').pct_change())
+        .drop_nulls()
+    )
+
+
+def _filter_hists_wide(
+    hists: pl.DataFrame,
+    refs: pl.DataFrame,
+    template: str,
+    types: list[str],
+    unit: str,
+    scale: int,
+) -> pl.DataFrame | None:
+    """Filter hists by type and pivot to wide."""
+    type_symbols = (
+        refs.filter(pl.col('type').is_in(types))
+        .get_column('symbol')
+        .to_list()
+    )
+    if not type_symbols:
+        return None
+
+    filtered = hists.filter(
+        (pl.col('symbol').is_in(type_symbols))
+        & (pl.col('template') == template)
+    )
+    if filtered.is_empty():
+        return None
+
+    filtered = slice_hist(filtered, unit, scale, for_analytics=True)
+    if filtered.is_empty():
+        return None
+
+    is_intraday = template in ('D', 'W')
+    index_cols = ['date', 'timestamp'] if is_intraday else ['date']
+
+    if not all(c in filtered.columns for c in index_cols + ['close']):
+        return None
+
+    wide = filtered.pivot(
+        on='symbol',
+        index=index_cols,
+        values='close',
+        aggregate_function='last',
+    )
+
+    return wide if not wide.is_empty() else None
+
+
+def _get_factor_candidates(
+    symbol: str,
+    factor_model: FactorModel,
+    hists: pl.DataFrame,
+    target_returns: pl.DataFrame,
+    template: str,
+    max_count: int = MAX_SINGLES,
+) -> list[str]:
+    """Pre-screen by factor distance, refine with corr.
+
+    Stage 1: Rank all stocks by factor loading distance,
+    take top PRESCREEN_MULT * max_count.
+    Stage 2: Compute correlation with target returns.
+    Composite: 0.7 * norm_factor_dist + 0.3 * (1 - corr).
+    Return top max_count by composite score.
+    """
+    target_smb = factor_model.smb.exposures.get(symbol)
+    target_tv = factor_model.turnover.exposures.get(symbol)
+    if not target_smb or not target_tv:
+        return []
+
+    # Stage 1: factor distance ranking
+    prescreen_count = max_count * PRESCREEN_MULT
+    all_dists = []
+    for s in factor_model.smb.exposures:
+        if s == symbol:
+            continue
+        smb_exp = factor_model.smb.exposures[s]
+        tv_exp = factor_model.turnover.exposures.get(s)
+        if not tv_exp:
+            continue
+        dist = abs(smb_exp.loading - target_smb.loading) + abs(
+            tv_exp.loading - target_tv.loading
+        )
+        all_dists.append((s, dist))
+
+    all_dists.sort(key=lambda x: x[1])
+    prescreened = all_dists[:prescreen_count]
+    if not prescreened:
+        return []
+
+    prescreen_syms = [s for s, _ in prescreened]
+    factor_dists = {s: d for s, d in prescreened}
+
+    # Normalize factor distances to [0, 1]
+    min_fd = prescreened[0][1]
+    max_fd = prescreened[-1][1]
+    fd_range = max_fd - min_fd
+
+    # Stage 2: correlation with target
+    cand_hists = hists.filter(
+        (pl.col('symbol').is_in(prescreen_syms))
+        & (pl.col('template') == template)
+    )
+    if cand_hists.is_empty():
+        return prescreen_syms[:max_count]
+
+    wide = cand_hists.pivot(
+        on='symbol',
+        index='date',
+        values='close',
+        aggregate_function='last',
+    )
+    wide = wide.with_columns(
+        pl.all().exclude('date').pct_change()
+    ).slice(1)
+
+    joined = target_returns.select(['date', 'target']).join(
+        wide, on='date', how='inner'
+    )
+
+    avail = [s for s in prescreen_syms if s in joined.columns]
+    corr_row = joined.select(
+        [pl.corr('target', s).alias(s) for s in avail]
+    )
+    corrs: dict[str, float] = {}
+    if not corr_row.is_empty():
+        for s in avail:
+            c = corr_row.get_column(s).item()
+            if c is not None:
+                corrs[s] = c
+
+    # Composite score
+    scored = []
+    for s in prescreen_syms:
+        fd = factor_dists[s]
+        norm_fd = (fd - min_fd) / fd_range if fd_range > 0 else 0.0
+        corr = corrs.get(s)
+        if corr is not None:
+            score = FACTOR_WEIGHT * norm_fd + CORR_WEIGHT * (
+                1.0 - corr
+            )
+        else:
+            score = norm_fd
+        scored.append((s, score))
+
+    scored.sort(key=lambda x: x[1])
+    return [s for s, _ in scored[:max_count]]
+
+
+def _build_singles_wide(
+    hists: pl.DataFrame,
+    refs: pl.DataFrame,
+    template: str,
+    unit: str,
+    scale: int,
+    exclude_symbol: str,
+    include_symbols: list[str] | None = None,
+) -> pl.DataFrame | None:
+    """Build wide-format hist for stock symbols.
+
+    If include_symbols is provided, only those stocks
+    are considered (factor pre-screened). Otherwise
+    all stocks are used.
+    """
+    if include_symbols is not None:
+        stock_symbols = [
+            s for s in include_symbols if s != exclude_symbol
+        ]
+    else:
+        stock_symbols = (
+            refs.filter(
+                (pl.col('type') == TYPE_STOCK)
+                & (pl.col('symbol') != exclude_symbol)
+            )
+            .get_column('symbol')
+            .to_list()
+        )
+    if not stock_symbols:
+        return None
+
+    filtered = hists.filter(
+        (pl.col('symbol').is_in(stock_symbols))
+        & (pl.col('template') == template)
+    )
+    if filtered.is_empty():
+        return None
+
+    filtered = slice_hist(filtered, unit, scale, for_analytics=True)
+    if filtered.is_empty():
+        return None
+
+    is_intraday = template in ('D', 'W')
+    index_cols = ['date', 'timestamp'] if is_intraday else ['date']
+
+    # Filter out sparse symbols
+    symbol_counts = filtered.group_by('symbol').len()
+    valid_symbols = (
+        symbol_counts.filter(pl.col('len') >= MIN_HIST)
+        .get_column('symbol')
+        .to_list()
+    )
+
+    excluded_count = len(stock_symbols) - len(valid_symbols)
+    if excluded_count > 0:
+        log.info(
+            f'singles: excluded {excluded_count} '
+            f'symbols < {MIN_HIST} bars'
+        )
+
+    if not valid_symbols:
+        return None
+
+    filtered = filtered.filter(pl.col('symbol').is_in(valid_symbols))
+
+    wide = filtered.pivot(
+        on='symbol',
+        index=index_cols,
+        values='close',
+        aggregate_function='last',
+    )
+
+    return wide if not wide.is_empty() else None
+
+
+def get_scenarios(
+    symbol: str,
+    hist: pl.DataFrame,
+    refs: pl.DataFrame,
+    hists: pl.DataFrame,
+    factor_model: FactorModel | None = None,
+    template: str = HIST_TEMPLATE_DEFAULT,
+    scale: int | None = None,
+) -> dict[str, pl.DataFrame]:
+    """Build scenario return matrices for optimization.
+
+    Each scenario is an independent candidate pool.
+    Singles are pre-screened by factor quintile
+    proximity when factor_model is available.
+    """
+    _, _, unit, default_scale, _ = HIST_TEMPLATES[template]
+    if scale is None:
+        scale = default_scale
+
+    symbol_hist = (
+        slice_hist(hist, unit, scale, for_analytics=True)
+        .select(['date', 'close'])
+        .rename({'close': 'target'})
+    )
+
+    if len(symbol_hist) < MIN_HIST:
+        log.warning(
+            f'scenarios: {symbol} has '
+            f'{len(symbol_hist)} bars '
+            f'< {MIN_HIST} required'
+        )
+        return {}
+
+    target_returns = get_returns(symbol_hist)
+
+    # Build returns for each group
+    group_returns: dict[str, pl.DataFrame] = {}
+
+    # Indices (SPY, QQQ, IWM) — cached across symbols
+    idx_key = (INDICES, template, scale)
+    if idx_key in _etf_returns_cache:
+        group_returns[INDICES] = _etf_returns_cache[idx_key]
+    else:
+        indices_wide = _filter_hists_wide(
+            hists,
+            refs,
+            template,
+            [TYPE_ETF_INDEX],
+            unit,
+            scale,
+        )
+        if indices_wide is not None and len(indices_wide) >= MIN_HIST:
+            group_returns[INDICES] = get_returns(indices_wide)
+            _etf_returns_cache[idx_key] = group_returns[INDICES]
+        else:
+            log.warning(f'scenarios: {INDICES} unavailable')
+
+    # Factors (sector/factor ETFs) — cached across symbols
+    fac_key = (FACTORS, template, scale)
+    if fac_key in _etf_returns_cache:
+        group_returns[FACTORS] = _etf_returns_cache[fac_key]
+    else:
+        factors_wide = _filter_hists_wide(
+            hists,
+            refs,
+            template,
+            [TYPE_ETF_FACTOR],
+            unit,
+            scale,
+        )
+        if factors_wide is not None and len(factors_wide) >= MIN_HIST:
+            group_returns[FACTORS] = get_returns(factors_wide)
+            _etf_returns_cache[fac_key] = group_returns[FACTORS]
+        else:
+            log.warning(f'scenarios: {FACTORS} unavailable')
+
+    # Singles (factor pre-screened)
+    include = None
+    if factor_model:
+        include = _get_factor_candidates(
+            symbol,
+            factor_model,
+            hists,
+            target_returns,
+            template,
+        )
+        log.info(
+            f'scenarios: {SINGLES} factor pre-screen '
+            f'-> {len(include)} candidates'
+        )
+
+    singles_wide = _build_singles_wide(
+        hists,
+        refs,
+        template,
+        unit,
+        scale,
+        exclude_symbol=symbol,
+        include_symbols=include,
+    )
+    if singles_wide is not None and len(singles_wide) >= MIN_HIST:
+        n_syms = singles_wide.width - 1
+        group_returns[SINGLES] = get_returns(singles_wide)
+        log.info(f'scenarios: {SINGLES} {n_syms} symbols')
+
+    # Log available groups
+    avail = {k: len(v) for k, v in group_returns.items()}
+    log.info(f'scenarios: {symbol} {template} groups={avail}')
+
+    # Build scenarios from definitions
+    scenarios = {}
+    for name, (label, groups) in SCENARIOS.items():
+        missing = [g for g in groups if g not in group_returns]
+        if missing:
+            log.debug(f'scenarios: {name} missing {missing}')
+            continue
+
+        returns_list = [group_returns[g] for g in groups]
+        returns_list.append(target_returns)
+
+        combined = pl.concat(
+            returns_list, how='align_left'
+        ).drop_nulls()
+
+        if len(combined) > MIN_HIST:
+            combined = combined.tail(MIN_HIST)
+
+        if len(combined) >= MIN_HIST:
+            scenarios[name] = combined
+            log.info(
+                f'scenarios: {name} ({label}) '
+                f'cols={combined.width} '
+                f'rows={combined.height}'
+            )
+        else:
+            log.warning(
+                f'scenarios: {name} '
+                f'{len(combined)} rows '
+                f'< {MIN_HIST} after join'
+            )
+
+    return scenarios
