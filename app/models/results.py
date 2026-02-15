@@ -18,6 +18,13 @@ class RefData(BaseModel):
     sic: str = f(Fmt.attr)
     shares_out: int = f(Fmt.shares, title='ShrsOut')
     mkt_cap: float = f(Fmt.notional, title='MktCap')
+    free_float: int = f(Fmt.shares, title='Float')
+    free_float_pct: float = f(Fmt.ratio, title='FloatPct')
+    free_float_date: str = f(Fmt.date, default='')
+    short_interest: int = f(Fmt.shares, title='SI', default=0)
+    days_to_cover: float = f(Fmt.ratio, title='DTC', default=0.0)
+    short_avg_vol: int = f(Fmt.shares, title='SIADV', default=0)
+    short_interest_date: str = f(Fmt.date, default='')
 
 
 class SymbolQuote(BaseModel):

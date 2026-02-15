@@ -324,6 +324,20 @@ class PriceService:
         if rows:
             log.blue(f'{symbol}\n{pl.DataFrame(rows)}')
 
+        if is_intraday and stats:
+            max_end = stats[max(stats)]['end_date']
+            overflow = bars_hist.filter(pl.col('date') > max_end)
+            log.yellow(
+                f'{symbol} {template} pre-session: '
+                f'end_date={max_end} '
+                f'total_bars={len(bars_hist)} '
+                f'overflow={len(overflow)}'
+            )
+            if not overflow.is_empty():
+                log.yellow(
+                    f'{symbol} {template} overflow bars:\n{overflow}'
+                )
+
         return SymbolHist.model_validate(
             {
                 'symbol': symbol,

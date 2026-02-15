@@ -1,6 +1,6 @@
 import os
 
-from polygon import RESTClient
+from massive import RESTClient
 
 API_KEY = os.getenv('POLYGON_API_KEY')
 

@@ -1,5 +1,6 @@
 import asyncio
 import os
+from time import monotonic
 
 import polars as pl
 
@@ -32,6 +33,7 @@ log = get_logger(__name__)
 SYM = 'symbol'
 SEARCH_LEN = 7
 MAX_SYMBOLS = int(os.getenv('MAX_SYMBOLS', '1000'))
+INTRADAY_TTL = 120  # seconds
 
 
 class Cache:
@@ -51,6 +53,7 @@ class Cache:
         self._refs_task: asyncio.Task | None = None
         self._loading_symbols: set[str] = set()
         self._hist_locks: dict[str, asyncio.Lock] = {}
+        self._hist_loaded_at: dict[tuple[str, str], float] = {}
 
     def _log_refs_summary(
         self,
@@ -215,32 +218,43 @@ class Cache:
 
         return hist if not hist.is_empty() else None
 
+    def hist_age(self, symbol: str, template: str) -> float | None:
+        loaded = self._hist_loaded_at.get((symbol, template))
+        if loaded is None:
+            return None
+        return monotonic() - loaded
+
     async def get_hist_async(
         self, symbol: str, template: str = HIST_TEMPLATE_DEFAULT
     ) -> pl.DataFrame | None:
         """Get hist for symbol/template, loading if needed."""
-        # Check unified cache first
         hist = self.get_hist(symbol, template)
-        if hist is not None:
+        stale = (
+            hist is not None
+            and template in ('W', 'D')
+            and (self.hist_age(symbol, template) or 0) > INTRADAY_TTL
+        )
+        if hist is not None and not stale:
             return hist
 
-        # Need to fetch from API
         if symbol not in self._hist_locks:
             self._hist_locks[symbol] = asyncio.Lock()
 
         async with self._hist_locks[symbol]:
-            # Re-check after acquiring lock
+            # Re-check after lock
             hist = self.get_hist(symbol, template)
-            if hist is not None:
+            age = self.hist_age(symbol, template)
+            if hist is not None and (
+                template not in ('W', 'D')
+                or (age is not None and age <= INTRADAY_TTL)
+            ):
                 return hist
 
-            # Fetch from API
-            hist = await load_symbol_template(
+            fresh = await load_symbol_template(
                 self.mds, symbol, template
             )
-            if not hist.is_empty():
-                # Add to unified hists (remove old entry first)
-                hist_with_meta = hist.with_columns(
+            if not fresh.is_empty():
+                hist_with_meta = fresh.with_columns(
                     pl.lit(symbol).alias('symbol'),
                     pl.lit(template).alias('template'),
                 )
@@ -256,7 +270,10 @@ class Cache:
                     self.hists = pl.concat(
                         [self.hists, hist_with_meta]
                     )
+                self._hist_loaded_at[(symbol, template)] = monotonic()
+                return fresh
 
+            # API returned empty — keep old data
             return hist
 
     async def _load_symbol_series_background(

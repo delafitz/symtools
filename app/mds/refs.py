@@ -27,6 +27,11 @@ REF_SCHEMA = {
     'mkt_cap': pl.Float64,
     'free_float': pl.Int64,
     'free_float_pct': pl.Float64,
+    'free_float_date': pl.String,
+    'short_interest': pl.Int64,
+    'days_to_cover': pl.Float64,
+    'short_avg_vol': pl.Int64,
+    'short_interest_date': pl.String,
 }
 
 

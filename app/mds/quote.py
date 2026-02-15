@@ -1,6 +1,6 @@
 import asyncio
 
-from polygon import RESTClient
+from massive import RESTClient
 
 from app.models.results import SymbolQuote
 from app.utils.dates import ns_to_dt

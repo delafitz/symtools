@@ -6,6 +6,7 @@ import polars as pl
 
 from app.mds.float import fetch_free_float
 from app.mds.hist import fetch_hist_template
+from app.mds.short_interest import fetch_short_interest
 from app.services.prices import (
     HIST_TEMPLATE_DEFAULT,
     HIST_TEMPLATES,
@@ -114,6 +115,11 @@ async def load_refs_async(
                         'mkt_cap': details['mkt_cap'],
                         'free_float': 0,
                         'free_float_pct': 0.0,
+                        'free_float_date': '',
+                        'short_interest': 0,
+                        'days_to_cover': 0.0,
+                        'short_avg_vol': 0,
+                        'short_interest_date': '',
                         'type': TYPE_STOCK,
                     }
             except asyncio.TimeoutError:
@@ -152,6 +158,11 @@ async def load_refs_async(
                 'mkt_cap': 0.0,
                 'free_float': 0,
                 'free_float_pct': 0.0,
+                'free_float_date': '',
+                'short_interest': 0,
+                'days_to_cover': 0.0,
+                'short_avg_vol': 0,
+                'short_interest_date': '',
                 'type': get_symbol_type(etf_sym),
             }
         )
@@ -164,22 +175,31 @@ async def load_refs_async(
         on_refs_update(refs)
 
     log.info('starting Phase 2...')
-    # Phase 2: Fetch floats for stocks only
+    # Phase 2: Fetch floats + short interest for stocks
     stock_rows = [r for r in refs_rows if r['type'] == TYPE_STOCK]
-    floats_total = len(stock_rows)
-    floats_done = 0
+    phase2_total = len(stock_rows)
+    phase2_done = 0
     floats_found = 0
+    si_found = 0
 
-    async def fetch_float(row: dict) -> bool:
-        nonlocal floats_done, floats_found
+    async def fetch_float_and_si(row: dict) -> None:
+        nonlocal phase2_done, floats_found, si_found
         async with semaphore:
             try:
-                float_data = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        fetch_free_float,
-                        client,
-                        row['symbol'],
-                        True,
+                float_data, si_data = await asyncio.wait_for(
+                    asyncio.gather(
+                        asyncio.to_thread(
+                            fetch_free_float,
+                            client,
+                            row['symbol'],
+                            True,
+                        ),
+                        asyncio.to_thread(
+                            fetch_short_interest,
+                            client,
+                            row['symbol'],
+                            True,
+                        ),
                     ),
                     timeout=10.0,
                 )
@@ -189,27 +209,48 @@ async def load_refs_async(
                     row['free_float_pct'] = float_data[
                         'free_float_percent'
                     ]
-                    return True
+                    row['free_float_date'] = (
+                        float_data['effective_date'] or ''
+                    )
+                if si_data:
+                    si_found += 1
+                    row['short_interest'] = (
+                        si_data['short_interest'] or 0
+                    )
+                    row['days_to_cover'] = (
+                        si_data['days_to_cover'] or 0.0
+                    )
+                    row['short_avg_vol'] = (
+                        si_data['avg_daily_volume'] or 0
+                    )
+                    row['short_interest_date'] = (
+                        si_data['settlement_date'] or ''
+                    )
             except (asyncio.TimeoutError, Exception):
                 pass
             finally:
-                floats_done += 1
-                if floats_done % 50 == 0:
+                phase2_done += 1
+                if phase2_done % 50 == 0:
                     log.info(
-                        f'  floats: {floats_done}/{floats_total} '
-                        f'({floats_found} found)'
+                        f'  phase2: {phase2_done}'
+                        f'/{phase2_total} '
+                        f'(floats={floats_found} '
+                        f'si={si_found})'
                     )
-            return False
 
     floats_start = perf_counter()
-    log.info(f'fetching floats for {floats_total} refs...')
+    log.info(
+        f'fetching floats + short interest for {phase2_total} refs...'
+    )
 
-    tasks = [fetch_float(row) for row in stock_rows]
-    float_results = await asyncio.gather(*tasks)
-    float_count = sum(1 for r in float_results if r)
+    tasks = [fetch_float_and_si(row) for row in stock_rows]
+    await asyncio.gather(*tasks)
 
     floats_elapsed = perf_counter() - floats_start
-    log.info(f'floats: {float_count} loaded, {floats_elapsed:.1f}s')
+    log.info(
+        f'phase2: floats={floats_found} si={si_found}, '
+        f'{floats_elapsed:.1f}s'
+    )
 
     # Phase 3: Fetch hists for all symbols x all templates
     # Prioritize: ETFs first, then top stocks by mkt_cap
@@ -349,7 +390,7 @@ async def load_refs_async(
     return {
         'details_count': len(refs_rows),
         'details_elapsed': details_elapsed,
-        'floats_count': float_count,
+        'floats_count': floats_found,
         'floats_elapsed': floats_elapsed,
         'hists_count': hists_found,
         'hists_elapsed': hists_elapsed,
