@@ -20,7 +20,7 @@ uv run basedpyright
 
 ## Environment Variables
 
-- `POLYGON_API_KEY` - Required for market data access via Polygon.io API
+- `POLYGON_API_KEY` - Required for market data access via Polygon.io API (using `massive` client)
 
 ## Architecture Overview
 
@@ -32,7 +32,7 @@ Symtools is a FastAPI-based financial analytics server providing portfolio optim
 - `app/server/` - HTTP layer (router.py endpoints, cache.py in-memory storage)
 - `app/services/` - Business logic (prices, refs, hist, cost, baskets/, alerts/)
 - `app/models/` - Pydantic request/response models
-- `app/mds/` - Market data service (Polygon API client wrapper)
+- `app/mds/` - Market data service (massive client, formerly polygon-api-client)
 - `app/utils/` - Helpers (store.py for parquet caching, trie.py for symbol search, groups.py for ETF lists and scenario defs)
 - `data/` - Parquet cache files (date-stamped: `*.YYYYMMDD.parquet`)
 
@@ -61,7 +61,7 @@ Runs 4 phases sequentially, each using the shared semaphore for concurrent API c
 | Phase | Description | Cache File | Progress Log |
 |-------|-------------|------------|--------------|
 | 1. Details | Fetch ticker details, filter by mkt_cap >= $1B | `refs.parquet` | every 50 |
-| 2. Floats | Fetch free float data for filtered refs | (in refs) | every 50 |
+| 2. Floats+SI | Fetch free float + short interest (concurrent per symbol) | (in refs) | every 50 |
 | 3. Hists | Prefetch Y template for top 1000 by mkt_cap | `hists_Y.parquet` | every 50 |
 | 4. Baskets | Load basket hists for all groups/templates | `{group}_{template}.parquet` | every 4 |
 
@@ -99,7 +99,7 @@ Runs 4 phases sequentially, each using the shared semaphore for concurrent API c
 
 All routes defined in `app/server/router.py`:
 - `/search` - Symbol prefix search via Trie
-- `/refs` - Security reference data (symbol, exch, name, curr, sic, shares_out, mkt_cap, free_float, free_float_pct)
+- `/refs` - Security reference data (symbol, exch, name, curr, sic, shares_out, mkt_cap, free_float, free_float_pct, free_float_date, short_interest, days_to_cover, short_avg_vol, short_interest_date)
 - `/snapshot` - SSE: streams quote, hist (Y/M/W/D), analytics, baskets, basket_hist, alerts. See `docs/snapshot-sse.md`.
 - `/quote` - Real-time quote (with session fields for pre/post/closed)
 - `/hist` - Historical OHLCV bars with per-scale stats

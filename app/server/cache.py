@@ -88,6 +88,52 @@ class Cache:
         log.info(f'top 5:\n{top5}')
         log.info(f'bottom 5:\n{bottom5}')
 
+        # Short interest / float ratio
+        has_si = stocks.filter(
+            (pl.col('short_interest') > 0)
+            & (pl.col('free_float') > 0)
+        )
+        if has_si.height > 0:
+            si_report = (
+                has_si.with_columns(
+                    (
+                        pl.col('short_interest')
+                        / pl.col('free_float')
+                        * 100
+                    )
+                    .round(1)
+                    .alias('si_pct_float')
+                )
+                .sort('si_pct_float', descending=True)
+                .head(10)
+                .select(
+                    'symbol',
+                    'name',
+                    'si_pct_float',
+                    'short_interest',
+                    'days_to_cover',
+                )
+            )
+            log.cyan(f'top 10 SI/float %:\n{si_report}')
+
+        # Lowest free float as % of shares out
+        has_ff = stocks.filter(
+            (pl.col('free_float') > 0) & (pl.col('shares_out') > 0)
+        )
+        if has_ff.height > 0:
+            ff_report = (
+                has_ff.sort('free_float_pct')
+                .head(10)
+                .select(
+                    'symbol',
+                    'name',
+                    'free_float_pct',
+                    'free_float',
+                    'shares_out',
+                )
+            )
+            log.cyan(f'lowest 10 float %:\n{ff_report}')
+
         # Log symbols without SIC
         no_sic = stocks.filter(
             (pl.col('sic').is_null()) | (pl.col('sic') == '')
