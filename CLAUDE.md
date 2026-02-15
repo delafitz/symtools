@@ -30,7 +30,7 @@ Symtools is a FastAPI-based financial analytics server providing portfolio optim
 
 - `app/main.py` - FastAPI application entry point
 - `app/server/` - HTTP layer (router.py endpoints, cache.py in-memory storage)
-- `app/services/` - Business logic (prices, refs, hist, cost, baskets/)
+- `app/services/` - Business logic (prices, refs, hist, cost, baskets/, alerts/)
 - `app/models/` - Pydantic request/response models
 - `app/mds/` - Market data service (Polygon API client wrapper)
 - `app/utils/` - Helpers (store.py for parquet caching, trie.py for symbol search, groups.py for ETF lists and scenario defs)
@@ -99,13 +99,13 @@ Runs 4 phases sequentially, each using the shared semaphore for concurrent API c
 
 All routes defined in `app/server/router.py`:
 - `/search` - Symbol prefix search via Trie
-- `/refs` - Security reference data (symbol, exch, name, curr, sic, shares_out, mkt_cap)
-- `/snapshot` - SSE: streams quote, hist (Y/M/W/D), analytics, baskets, basket_hist. See `docs/snapshot-sse.md`.
+- `/refs` - Security reference data (symbol, exch, name, curr, sic, shares_out, mkt_cap, free_float, free_float_pct)
+- `/snapshot` - SSE: streams quote, hist (Y/M/W/D), analytics, baskets, basket_hist, alerts. See `docs/snapshot-sse.md`.
 - `/quote` - Real-time quote (with session fields for pre/post/closed)
 - `/hist` - Historical OHLCV bars with per-scale stats
 - `/baskets` - Cached basket optimizations
 - `/optimize` - No-op stub (disabled)
-- `/cost` - Transaction cost calculations (slippage, xADV)
+- `/cost` - Transaction cost calculations (slippage, xADV, cost alerts)
 
 ### Basket Optimization
 
@@ -133,6 +133,8 @@ Owns daily (Y) hist data, template routing, SymbolHist response building, and pr
 2. `_loaded_at` older than `DAILY_DEFAULT_TTL` (300s / 5 min)
 
 When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merges into `_daily`, and recomputes `pct_return`.
+
+**Intraday refresh**: W/D hists are re-fetched by `cache.get_hist_async` when age > `INTRADAY_TTL` (120s). This is transparent — callers get fresh data without any code change. The stream pre-fetch (step 6) also refreshes stale basket-constituent W/D hists.
 
 **Price lookups** (all operate on `_daily`):
 - `close(date_str)` — daily close for a date
@@ -170,6 +172,16 @@ When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merge
 - `prev_date` = `prev_weekday(start_date)`
 - Bar data may include pre-session bars beyond `end_date`; stats reflect finalized daily closes.
 
+**Market Sessions** (`app/utils/market.py`):
+| Session | Window (ET) | Quote fields |
+|---|---|---|
+| `closed` | before 4:30 AM | `session="closed"`, no last/chg |
+| `pre` | 4:30 AM – 9:30 AM | `session="pre"`, `sessionChg = last - prevClose` |
+| `market` | 9:30 AM – 4:00 PM | session fields absent |
+| `post` | 4:00 PM – 11:59 PM | `session="post"`, `sessionChg = last - todayClose` |
+
+Session classification via `get_session(ts_ms)` on the Polygon quote timestamp. Hist responses have no session field — session awareness is embedded in date range logic (see intraday stats above).
+
 **Basket Tracking** (`app/services/tracking.py:compute_tracking_for_template`):
 1. For each scenario, join basket symbol closes from unified `cache.hists` to symbol hist on date/timestamp
 2. Forward-fill + backward-fill nulls
@@ -180,13 +192,31 @@ When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merge
 
 **Timestamp Alignment**: Intraday timestamps rounded to bar boundaries (`round_ts` in `app/utils/dates.py`) for consistent joins across symbols.
 
+### Alerts Service (`app/services/alerts/`)
+
+Rule-based signals evaluated from symbol data. Decorator-based registry: `@rule(category)` auto-registers functions `(AlertContext) -> Alert | None`. `evaluate(ctx, categories?)` runs all (or filtered) rules, returns `SymbolAlerts | None`.
+
+**AlertContext** — single data bag with optional fields (`ref`, `analytics`, `baskets`, `daily`, `costs`, `overrides`). Rules check for required data and return `None` if unavailable.
+
+**Rule categories** (`app/services/alerts/rules/`):
+- `liquidity` — `low_liquidity` (ADV < 1% float), `high_turnover` (ADV > 5% float)
+- `volatility` — `high_vol` (>50%/100%), `vol_discord` (30d/90d divergence), `vol_change` (30d > 1.3x 90d)
+- `moves` — `recent_move_{1,3,5}d` (return vs sigma)
+- `baskets` — `poor_index_hedge` (200d corr < 0.2), `no_good_hedges` (no scenario > 0.5 corr)
+- `cost` — `size_pct_float`, `high_adv_multiple`, `override_vol_mismatch`, `override_adv_mismatch`
+
+**Integration**:
+- SSE stream: emitted as step 8 (after all hists + basket_hists), excludes cost category
+- `/cost` endpoint: cost-category alerts included in `SymbolCostCalcs.alerts`
+
 **Cache** (`app/server/cache.py`):
 - Unified hists: `self.hists` — single Polars DataFrame with `symbol`/`template` columns, all templates concatenated
 - `get_hist(symbol, template)` — sync, filters unified hists, drops metadata columns
-- `get_hist_async(symbol, template)` — async, fetches from API if not cached, adds to unified hists
+- `get_hist_async(symbol, template)` — async, fetches from API if not cached or stale, adds to unified hists
+- Intraday TTL: W/D hists tracked via `_hist_loaded_at` timestamps; re-fetched when age > `INTRADAY_TTL` (120s). Double-checked inside the per-symbol lock to avoid redundant concurrent fetches. Empty API responses preserve old cached data.
 - Parquet: `data/hists.YYYYMMDD.parquet` — persisted on startup, loaded on cached startup
 - Baskets: `data/baskets.YYYYMMDD.parquet` — cached optimizer weights, rebuilt on load
-- During snapshot stream, M/W/D hists for basket constituent symbols (singles) are fetched on-demand if not already cached
+- During snapshot stream, M/W/D hists for basket constituent symbols (singles) are fetched on-demand if not already cached or stale
 
 ## Code Style
 
@@ -206,6 +236,7 @@ Services return Pydantic models directly — no `model_validate` at call sites:
 - `cache.get_quote()` → `SymbolQuote`
 - `cache.get_costs()` → `SymbolCostCalcs | None`
 - `cache.get_baskets()` → `SymbolBaskets | None`
+- `evaluate()` → `SymbolAlerts | None`
 
 The basket pipeline passes `SymbolBaskets`/`Basket` models end-to-end (builder → service → cache → stream → tracking). `calc_stats()` in `baskets/risk.py` returns a dict internally; `Basket.model_validate()` happens in `builder.py`.
 

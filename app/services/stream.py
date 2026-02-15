@@ -17,6 +17,8 @@ from app.utils.logger import get_logger
 if TYPE_CHECKING:
     from app.server.cache import Cache
 
+from app.server.cache import INTRADAY_TTL
+
 log = get_logger(__name__)
 
 
@@ -127,6 +129,10 @@ async def stream_symbol(
             for sym in basket_syms
             for t in ['M', 'W', 'D']
             if cache.get_hist(sym, t) is None
+            or (
+                t in ('W', 'D')
+                and (cache.hist_age(sym, t) or 0) > INTRADAY_TTL
+            )
         ]
         if fetch_tasks:
             await asyncio.gather(*fetch_tasks)
@@ -182,3 +188,17 @@ async def stream_symbol(
                     yield ('basket_hist', bh)
             else:
                 log.yellow(f'{symbol} {template} tracking: None')
+
+    # 8. Alerts
+    from app.services.alerts import AlertContext, evaluate
+
+    ctx = AlertContext(
+        symbol=symbol,
+        ref=cache.get_ref(symbol),
+        analytics=analytics,
+        baskets=baskets,
+        daily=prices.daily,
+    )
+    alerts = evaluate(ctx)
+    if alerts:
+        yield ('alerts', alerts)

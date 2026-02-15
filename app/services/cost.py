@@ -63,7 +63,7 @@ async def calc_costs(
             pct_mkt_cap = notional / ref['mkt_cap']
             pct_float = shares / ref['shares_out']
 
-            return SymbolCostCalcs.model_validate(
+            result = SymbolCostCalcs.model_validate(
                 {
                     'symbol': snap.symbol,
                     'discount': {
@@ -81,4 +81,20 @@ async def calc_costs(
                     },
                 }
             )
+            from app.services.alerts import (
+                AlertContext,
+                evaluate,
+            )
+
+            ctx = AlertContext(
+                symbol=overrides.symbol,
+                ref=ref,
+                analytics=snap,
+                costs=result,
+                overrides=overrides,
+            )
+            alert_result = evaluate(ctx, categories={'cost'})
+            if alert_result:
+                result.alerts = alert_result.alerts
+            return result
     return None

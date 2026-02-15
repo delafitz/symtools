@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from pydantic import BaseModel
 
+from app.models.alerts import Alert
 from app.utils.models import Fmt, config, f, fp
 
 
@@ -25,3 +28,4 @@ class SymbolCostCalcs(BaseModel):
     symbol: str = f(Fmt.symbol)
     discount: VolTimeCalcs = fp(title='Discount')
     stats: VolTimeStats = fp(title='Stats')
+    alerts: list[Alert] = []
