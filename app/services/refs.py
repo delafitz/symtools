@@ -176,7 +176,10 @@ async def load_refs_async(
             try:
                 float_data = await asyncio.wait_for(
                     asyncio.to_thread(
-                        fetch_free_float, client, row['symbol']
+                        fetch_free_float,
+                        client,
+                        row['symbol'],
+                        True,
                     ),
                     timeout=10.0,
                 )
@@ -232,6 +235,7 @@ async def load_refs_async(
                         client,
                         symbol,
                         HIST_TEMPLATE_DEFAULT,
+                        True,
                     ),
                     timeout=30.0,
                 )
@@ -285,6 +289,7 @@ async def load_refs_async(
                         client,
                         symbol,
                         template,
+                        True,
                     ),
                     timeout=30.0,
                 )

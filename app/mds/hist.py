@@ -56,6 +56,7 @@ def fetch_hist(
     scale: int,
     close_only: bool = False,
     open_close_only: bool = False,
+    quiet: bool = False,
 ) -> pl.DataFrame:
     """Fetch OHLCV hist for a symbol."""
     start = perf_counter()
@@ -121,12 +122,13 @@ def fetch_hist(
         )
 
     elapsed = perf_counter() - start
-    log.blue(
-        f'{symbol.upper()} {scale}{unit[0]} '
-        f'{from_dt}->{to_dt} '
-        f'{timespan}/{multiplier} '
-        f'{len(df)} rows {elapsed:.2f}s'
-    )
+    if not quiet:
+        log.blue(
+            f'{symbol.upper()} {scale}{unit[0]} '
+            f'{from_dt}->{to_dt} '
+            f'{timespan}/{multiplier} '
+            f'{len(df)} rows {elapsed:.2f}s'
+        )
 
     return df
 
@@ -135,13 +137,20 @@ def fetch_hist_template(
     client,
     symbol: str,
     template: str = HIST_TEMPLATE_DEFAULT,
+    quiet: bool = False,
 ) -> pl.DataFrame:
     """Fetch hist at maxScale for a template."""
     timespan, multiplier, unit, _, max_scale = HIST_TEMPLATES[
         template
     ]
     return fetch_hist(
-        client, symbol, timespan, multiplier, unit, max_scale
+        client,
+        symbol,
+        timespan,
+        multiplier,
+        unit,
+        max_scale,
+        quiet=quiet,
     )
 
 

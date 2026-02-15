@@ -5,7 +5,9 @@ from app.utils.logger import get_logger
 log = get_logger(__name__)
 
 
-def fetch_free_float(client, symbol: str) -> dict | None:
+def fetch_free_float(
+    client, symbol: str, quiet: bool = False
+) -> dict | None:
     """Fetch free float data for a symbol.
 
     Returns dict with:
@@ -19,12 +21,13 @@ def fetch_free_float(client, symbol: str) -> dict | None:
         data = client._get(path)
         if data.get('results'):
             result = data['results'][0]
-            log.info(
-                f'{symbol.upper()} free_float: '
-                f'{result["free_float_percent"]:.1f}% '
-                f'({result["free_float"]:,} shares) '
-                f'as of {result["effective_date"]}'
-            )
+            if not quiet:
+                log.info(
+                    f'{symbol.upper()} free_float: '
+                    f'{result["free_float_percent"]:.1f}% '
+                    f'({result["free_float"]:,} shares) '
+                    f'as of {result["effective_date"]}'
+                )
             return {
                 'ticker': result['ticker'],
                 'effective_date': result['effective_date'],
