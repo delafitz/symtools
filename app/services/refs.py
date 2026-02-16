@@ -151,7 +151,7 @@ async def load_refs_async(
         csv_date = date.today().strftime('%Y%m%d')
         csv_path = f'./data/refs.{csv_date}.csv'
         pl.DataFrame(refs_rows).select(
-            'symbol', 'name', 'cik'
+            'symbol', 'name', 'cik', 'mkt_cap'
         ).write_csv(csv_path)
         log.info(f'wrote {csv_path}')
 
