@@ -32,6 +32,23 @@ def _level(score: float) -> str:
     return 'info'
 
 
+def _scale(
+    value: float,
+    threshold: float,
+    above: bool = True,
+) -> float:
+    """Score 0.3–0.9 based on distance past threshold.
+
+    above=True: value > threshold is bad (most rules)
+    above=False: value < threshold is bad
+    """
+    if above:
+        severity = value / threshold
+    else:
+        severity = threshold / max(value, 1e-9)
+    return min(0.9, 0.3 + 0.4 * (severity - 1))
+
+
 @dataclass
 class AlertContext:
     symbol: str

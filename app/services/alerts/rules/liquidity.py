@@ -1,5 +1,10 @@
 from app.models.alerts import Alert
-from app.services.alerts import AlertContext, _level, rule
+from app.services.alerts import (
+    AlertContext,
+    _level,
+    _scale,
+    rule,
+)
 
 
 @rule('liquidity')
@@ -13,15 +18,18 @@ def low_liquidity(ctx: AlertContext) -> Alert | None:
     ratio = adv / ff
     if ratio >= 0.01:
         return None
-    score = 0.5
+    score = _scale(ratio, 0.01, above=False)
     return Alert(
         rule='low_liquidity',
         category='liquidity',
         level=_level(score),
         score=score,
-        label='ADV < 1% of float',
+        label='LowADV',
+        desc='ADV < 1% of float',
         value=ratio,
+        value_format='pct',
         threshold=0.01,
+        threshold_format='pct',
     )
 
 
@@ -36,13 +44,16 @@ def high_turnover(ctx: AlertContext) -> Alert | None:
     ratio = adv / ff
     if ratio <= 0.05:
         return None
-    score = 0.5
+    score = _scale(ratio, 0.05)
     return Alert(
         rule='high_turnover',
         category='liquidity',
         level=_level(score),
         score=score,
-        label='ADV > 5% of float',
+        label='HighADV',
+        desc='ADV > 5% of float',
         value=ratio,
+        value_format='pct',
         threshold=0.05,
+        threshold_format='pct',
     )

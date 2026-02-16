@@ -1,5 +1,10 @@
 from app.models.alerts import Alert
-from app.services.alerts import AlertContext, _level, rule
+from app.services.alerts import (
+    AlertContext,
+    _level,
+    _scale,
+    rule,
+)
 
 
 @rule('cost')
@@ -9,15 +14,18 @@ def size_pct_float(ctx: AlertContext) -> Alert | None:
     pct = ctx.costs.stats.pct_float
     if pct <= 0.10:
         return None
-    score = 0.6
+    score = _scale(pct, 0.10)
     return Alert(
         rule='size_pct_float',
         category='cost',
         level=_level(score),
         score=score,
-        label='Shares > 10% of float',
+        label='PctFloat',
+        desc='Shares > 10% of float',
         value=pct,
+        value_format='pct',
         threshold=0.10,
+        threshold_format='pct',
     )
 
 
@@ -28,15 +36,18 @@ def high_adv_multiple(ctx: AlertContext) -> Alert | None:
     xadv = ctx.costs.stats.xadv
     if xadv <= 5:
         return None
-    score = 0.5
+    score = _scale(xadv, 5.0)
     return Alert(
         rule='high_adv_multiple',
         category='cost',
         level=_level(score),
         score=score,
-        label='xADV > 5',
+        label='xADV',
+        desc='xADV > 5',
         value=xadv,
+        value_format='ratio',
         threshold=5.0,
+        threshold_format='ratio',
     )
 
 
@@ -56,15 +67,18 @@ def override_vol_mismatch(
     diff = abs(ctx.overrides.volatility - hist) / hist
     if diff <= 0.20:
         return None
-    score = 0.3
+    score = _scale(diff, 0.20)
     return Alert(
         rule='override_vol_mismatch',
         category='cost',
         level=_level(score),
         score=score,
-        label='Override vol differs > 20%',
+        label='VolOver',
+        desc='Override vol > 20% off',
         value=diff,
+        value_format='pct',
         threshold=0.20,
+        threshold_format='pct',
     )
 
 
@@ -84,13 +98,16 @@ def override_adv_mismatch(
     diff = abs(ctx.overrides.adv - hist) / hist
     if diff <= 0.20:
         return None
-    score = 0.3
+    score = _scale(diff, 0.20)
     return Alert(
         rule='override_adv_mismatch',
         category='cost',
         level=_level(score),
         score=score,
-        label='Override ADV differs > 20%',
+        label='ADVOver',
+        desc='Override ADV > 20% off',
         value=diff,
+        value_format='pct',
         threshold=0.20,
+        threshold_format='pct',
     )

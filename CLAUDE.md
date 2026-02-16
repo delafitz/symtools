@@ -200,8 +200,8 @@ Rule-based signals evaluated from symbol data. Decorator-based registry: `@rule(
 
 **Rule categories** (`app/services/alerts/rules/`):
 - `liquidity` — `low_liquidity` (ADV < 1% float), `high_turnover` (ADV > 5% float)
-- `volatility` — `high_vol` (>50%/100%), `vol_discord` (30d/90d divergence), `vol_change` (30d > 1.3x 90d)
-- `moves` — `recent_move_{1,3,5}d` (return vs sigma)
+- `volatility` — `high_vol` (>50%), `vol_disperse` (30d/90d divergence), `vol_change` (30d > 1.3x 90d)
+- `moves` — `sigma_move_{1,3,5}d` (return vs sigma)
 - `baskets` — `poor_index_hedge` (200d corr < 0.2), `no_good_hedges` (no scenario > 0.5 corr)
 - `cost` — `size_pct_float`, `high_adv_multiple`, `override_vol_mismatch`, `override_adv_mismatch`
 
