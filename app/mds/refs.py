@@ -22,6 +22,7 @@ REF_SCHEMA = {
     'exch': pl.String,
     'name': pl.String,
     'curr': pl.String,
+    'cik': pl.String,
     'sic': pl.String,
     'shares_out': pl.Int64,
     'mkt_cap': pl.Float64,
@@ -67,6 +68,7 @@ def fetch_ticker_details(client, symbol: str):
     details = client.get_ticker_details(symbol.upper())
     if details.market_cap and details.market_cap > MIN_MKT_CAP:
         return {
+            'cik': details.cik or '',
             'sic': details.sic_description or '',
             'shares_out': details.share_class_shares_outstanding or 0,
             'mkt_cap': details.market_cap,

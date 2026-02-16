@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 from time import perf_counter
 from typing import Callable
 
@@ -110,6 +111,7 @@ async def load_refs_async(
                         'exch': ticker['exch'],
                         'name': ticker['name'],
                         'curr': ticker['curr'],
+                        'cik': details['cik'],
                         'sic': details['sic'],
                         'shares_out': details['shares_out'],
                         'mkt_cap': details['mkt_cap'],
@@ -144,6 +146,15 @@ async def load_refs_async(
         f'{details_elapsed:.1f}s'
     )
 
+    # Write refs CSV (symbol, name, cik)
+    if refs_rows:
+        csv_date = date.today().strftime('%Y%m%d')
+        csv_path = f'./data/refs.{csv_date}.csv'
+        pl.DataFrame(refs_rows).select(
+            'symbol', 'name', 'cik'
+        ).write_csv(csv_path)
+        log.info(f'wrote {csv_path}')
+
     # Add ETF symbols to refs (with placeholder data)
     log.info(f'adding {len(etf_symbols)} ETF symbols to refs...')
     for etf_sym in etf_symbols:
@@ -153,6 +164,7 @@ async def load_refs_async(
                 'exch': 'ETF',
                 'name': etf_sym,
                 'curr': 'USD',
+                'cik': '',
                 'sic': 0,
                 'shares_out': 0,
                 'mkt_cap': 0.0,

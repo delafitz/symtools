@@ -57,3 +57,29 @@ def high_turnover(ctx: AlertContext) -> Alert | None:
         threshold=0.05,
         threshold_format='pct',
     )
+
+
+@rule('liquidity')
+def high_short_interest(ctx: AlertContext) -> Alert | None:
+    if not ctx.ref:
+        return None
+    si = ctx.ref.get('short_interest')
+    ff = ctx.ref.get('free_float')
+    if not si or si <= 0 or not ff or ff <= 0:
+        return None
+    ratio = si / ff
+    if ratio <= 0.05:
+        return None
+    score = _scale(ratio, 0.05)
+    return Alert(
+        rule='high_short_interest',
+        category='liquidity',
+        level=_level(score),
+        score=score,
+        label='ShortInt',
+        desc='SI > 5% of float',
+        value=ratio,
+        value_format='pct',
+        threshold=0.05,
+        threshold_format='pct',
+    )

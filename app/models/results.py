@@ -15,6 +15,7 @@ class RefData(BaseModel):
     exch: str = f(Fmt.attr)
     name: str = f(Fmt.attr)
     curr: str = f(Fmt.attr)
+    cik: str = f(Fmt.attr, default='')
     sic: str = f(Fmt.attr)
     shares_out: int = f(Fmt.shares, title='ShrsOut')
     mkt_cap: float = f(Fmt.notional, title='MktCap')
