@@ -25,6 +25,7 @@ class Fmt(str, Enum):
     price = 'px'
     pct = 'pct'
     vol = 'vol'
+    volume = 'volume'
     discount = 'discount'
     ratio = 'ratio'
     weight = 'weight'

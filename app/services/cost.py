@@ -88,11 +88,11 @@ async def calc_costs(
         return None
 
     mkt_cap = ref['mkt_cap'] or 0
-    shares_out = ref['shares_out'] or 0
+    free_float = ref['free_float'] or 0
 
-    if mkt_cap <= 0 or shares_out <= 0:
+    if mkt_cap <= 0 or free_float <= 0:
         log.warning(
-            f'cost: {sym} mkt_cap={mkt_cap} shares_out={shares_out}'
+            f'cost: {sym} mkt_cap={mkt_cap} free_float={free_float}'
         )
         return None
 
@@ -100,7 +100,7 @@ async def calc_costs(
     sigma = vol / DAILY_ANN
     discount = get_discount(shares, adv, vol)
     pct_mkt_cap = notional / mkt_cap
-    pct_float = shares / shares_out
+    pct_float = shares / free_float
 
     result = SymbolCostCalcs.model_validate(
         {

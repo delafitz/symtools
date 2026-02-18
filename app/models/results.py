@@ -24,7 +24,7 @@ class RefData(BaseModel):
     free_float_date: str = f(Fmt.date, default='')
     short_interest: int = f(Fmt.shares, title='SI', default=0)
     days_to_cover: float = f(Fmt.ratio, title='DTC', default=0.0)
-    short_avg_vol: int = f(Fmt.shares, title='SIADV', default=0)
+    short_avg_vol: int = f(Fmt.volume, title='SIADV', default=0)
     short_interest_date: str = f(Fmt.date, default='')
 
 
@@ -35,7 +35,7 @@ class SymbolQuote(BaseModel):
     prev: float = f(Fmt.price)
     close: float = f(Fmt.price)
     last: float = f(Fmt.price)
-    volume: float = f(Fmt.shares)
+    volume: float = f(Fmt.volume)
     chg: float = f(Fmt.price)
     pct_chg: float = f(Fmt.pct)
     session: str | None = f(Fmt.attr, default=None)

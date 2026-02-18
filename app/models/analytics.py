@@ -15,10 +15,10 @@ class SymbolAnalytics(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
     vol: float = f(Fmt.vol)
-    adv: float = f(Fmt.shares)
+    adv: float = f(Fmt.volume)
     hist_vol: dict[str, TermStruct] = fp(
         'HistVol', Fmt.vol, '5d', Fmt.meta
     )
     hist_adv: dict[str, TermStruct] = fp(
-        'ADV', Fmt.shares, '5d', Fmt.meta
+        'ADV', Fmt.volume, '5d', Fmt.meta
     )
