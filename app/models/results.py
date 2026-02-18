@@ -41,3 +41,4 @@ class SymbolQuote(BaseModel):
     session: str | None = f(Fmt.attr, default=None)
     session_last: float | None = f(Fmt.price, default=None)
     session_chg: float | None = f(Fmt.price, default=None)
+    session_volume: float | None = f(Fmt.volume, default=None)

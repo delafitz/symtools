@@ -173,14 +173,34 @@ When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merge
 - Bar data may include pre-session bars beyond `end_date`; stats reflect finalized daily closes.
 
 **Market Sessions** (`app/utils/market.py`):
-| Session | Window (ET) | Quote fields |
-|---|---|---|
-| `closed` | before 4:30 AM | `session="closed"`, no last/chg |
-| `pre` | 4:30 AM – 9:30 AM | `session="pre"`, `sessionChg = last - prevClose` |
-| `market` | 9:30 AM – 4:00 PM | session fields absent |
-| `post` | 4:00 PM – 11:59 PM | `session="post"`, `sessionChg = last - todayClose` |
+| Session | Window (ET) |
+|---|---|
+| `closed` | before 4:30 AM |
+| `pre` | 4:30 AM – 9:30 AM |
+| `market` | 9:30 AM – 4:00 PM |
+| `post` | 4:00 PM – 11:59 PM |
 
 Session classification via `get_session(ts_ms)` on the Polygon quote timestamp. Hist responses have no session field — session awareness is embedded in date range logic (see intraday stats above).
+
+**Quote Fields by Session** (`app/mds/quote.py`):
+
+| Field | closed | pre | market | post |
+|---|---|---|---|---|
+| `prev` | prev close | prev close | prev close | prev close |
+| `close` | =prev | =prev | today running | today final |
+| `last` | =prev | pre-mkt px | ≈close | post-mkt px |
+| `volume` | prev vol | prev vol | today vol | today vol |
+| `chg`/`pctChg` | from API | from API | from API | from API |
+| `session` | "closed" | "pre" | null | "post" |
+| `sessionLast` | null | =last | null | =last |
+| `sessionChg` | null | last - prev | null | last - close |
+| `sessionVolume` | null | min.accum_vol | null | min.accum_vol |
+
+Price resolution: `last_trade > min.close > prev_day.close`
+Volume resolution: `day.volume > prev_day.volume`
+Close resolution: `day.close > prev_day.close`
+
+`sessionLast` duplicates `last` for convenience — lets clients grab all session-specific fields without checking session type.
 
 **Basket Tracking** (`app/services/tracking.py:compute_tracking_for_template`):
 1. For each scenario, join basket symbol closes from unified `cache.hists` to symbol hist on date/timestamp
