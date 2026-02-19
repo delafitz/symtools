@@ -1,5 +1,3 @@
-import asyncio
-
 from massive import RESTClient
 
 from app.utils.logger import get_logger
@@ -35,20 +33,11 @@ def fetch_free_float(
                 )
             return {
                 'ticker': r.ticker,
-                'effective_date': r.effective_date,
+                'effective_date': (r.effective_date),
                 'free_float': r.free_float,
-                'free_float_percent': r.free_float_percent,
+                'free_float_percent': (r.free_float_percent),
             }
         return None
     except Exception as e:
         log.warning(f'{symbol.upper()} free_float error: {e}')
         return None
-
-
-async def get_free_float(
-    client: RESTClient, symbol: str
-) -> dict | None:
-    """Async wrapper for fetch_free_float."""
-    return await asyncio.to_thread(
-        fetch_free_float, client, symbol, True
-    )

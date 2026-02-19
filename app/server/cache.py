@@ -4,8 +4,7 @@ from time import monotonic
 
 import polars as pl
 
-from app.mds.client import get_client
-from app.mds.quote import get_symbol_quote
+from app.mds.client import get_provider
 from app.models.analytics import SymbolAnalytics
 from app.models.baskets import SymbolBaskets
 from app.models.cost import SymbolCostCalcs
@@ -22,7 +21,6 @@ from app.services.prices import HIST_TEMPLATE_DEFAULT
 from app.services.refs import (
     get_cached_refs,
     get_cached_hists,
-    get_ticker_list,
     load_refs_async,
 )
 from app.utils.logger import get_logger
@@ -43,7 +41,7 @@ class Cache:
     """
 
     def __init__(self) -> None:
-        self.mds = get_client()
+        self.mds = get_provider()
         self.refs: pl.DataFrame | None = None
         self.hists: pl.DataFrame | None = None
         self.tickers: pl.DataFrame | None = None
@@ -205,7 +203,7 @@ class Cache:
             return
 
         # Fresh load needed
-        self.tickers = get_ticker_list(self.mds, MAX_SYMBOLS)
+        self.tickers = self.mds.list_tickers(MAX_SYMBOLS)
         self.symbols = Trie(self.tickers.get_column(SYM).to_list())
         self._refs_task = asyncio.create_task(
             self._load_refs_background()
@@ -389,7 +387,7 @@ class Cache:
         return await calc_costs(self, overrides)
 
     async def get_quote(self, symbol: str) -> SymbolQuote:
-        return await get_symbol_quote(self.mds, symbol)
+        return await asyncio.to_thread(self.mds.get_quote, symbol)
 
     def search_token(
         self, token: str, length: int = SEARCH_LEN

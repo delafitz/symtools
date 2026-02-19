@@ -1,5 +1,3 @@
-import asyncio
-
 from massive import RESTClient
 
 from app.utils.logger import get_logger
@@ -35,28 +33,20 @@ def fetch_short_interest(
         if r:
             if not quiet:
                 log.info(
-                    f'{symbol.upper()} short_interest: '
+                    f'{symbol.upper()} '
+                    f'short_interest: '
                     f'{r.short_interest:,} shares '
                     f'({r.days_to_cover:.1f} DTC) '
                     f'as of {r.settlement_date}'
                 )
             return {
                 'ticker': r.ticker,
-                'settlement_date': r.settlement_date,
-                'short_interest': r.short_interest,
-                'days_to_cover': r.days_to_cover,
-                'avg_daily_volume': r.avg_daily_volume,
+                'settlement_date': (r.settlement_date),
+                'short_interest': (r.short_interest),
+                'days_to_cover': (r.days_to_cover),
+                'avg_daily_volume': (r.avg_daily_volume),
             }
         return None
     except Exception as e:
         log.warning(f'{symbol.upper()} short_interest error: {e}')
         return None
-
-
-async def get_short_interest(
-    client: RESTClient, symbol: str
-) -> dict | None:
-    """Async wrapper for fetch_short_interest."""
-    return await asyncio.to_thread(
-        fetch_short_interest, client, symbol, True
-    )

@@ -1,10 +1,5 @@
-import os
-
-from massive import RESTClient
-
-API_KEY = os.getenv('POLYGON_API_KEY')
+from app.mds.polygon import PolygonProvider
 
 
-def get_client():
-    client = RESTClient(API_KEY)
-    return client
+def get_provider() -> PolygonProvider:
+    return PolygonProvider()

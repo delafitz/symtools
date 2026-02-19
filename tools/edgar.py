@@ -229,19 +229,13 @@ def main():
             nonlocal sym_printed, found
             if not sym_printed:
                 found += 1
-                print(
-                    f'\n{sym.upper()} '
-                    f'({ref["name"]}) CIK={cik}'
-                )
+                print(f'\n{sym.upper()} ({ref["name"]}) CIK={cik}')
                 sym_printed = True
 
         # Print S-3 filings individually
         for f in s3_filings:
             print_header()
-            print(
-                f'  {f["date"]}  {f["form"]:12s}'
-                f'  {f["url"]}'
-            )
+            print(f'  {f["date"]}  {f["form"]:12s}  {f["url"]}')
 
         # Summarize 424B filings by type
         if b424_counts:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from app.mds.hist import (
+from app.services.prices import (
     HIST_TEMPLATE_DEFAULT,
     HIST_TEMPLATES,
 )

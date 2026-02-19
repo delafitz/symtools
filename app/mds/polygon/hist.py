@@ -1,4 +1,3 @@
-import asyncio
 from time import perf_counter
 
 import polars as pl
@@ -152,63 +151,3 @@ def fetch_hist_template(
         max_scale,
         quiet=quiet,
     )
-
-
-async def fetch_hist_async(
-    client,
-    symbol: str,
-    template: str = HIST_TEMPLATE_DEFAULT,
-) -> pl.DataFrame:
-    """Async wrapper for fetch_hist_template."""
-    return await asyncio.to_thread(
-        fetch_hist_template, client, symbol, template
-    )
-
-
-async def fetch_symbol_series(
-    client,
-    symbol: str,
-    templates: list[str] | None = None,
-) -> dict[str, pl.DataFrame]:
-    """Fetch all templates for a symbol concurrently."""
-    templates = templates or list(HIST_TEMPLATES.keys())
-    tasks = {
-        tmpl: asyncio.to_thread(
-            fetch_hist_template, client, symbol, tmpl
-        )
-        for tmpl in templates
-    }
-    results = {}
-    for tmpl, task in tasks.items():
-        results[tmpl] = await task
-    return results
-
-
-def fetch_basket_hist(
-    client,
-    symbol: str,
-    template: str = HIST_TEMPLATE_DEFAULT,
-) -> pl.DataFrame:
-    """Fetch prices for basket analysis (template-aware)."""
-    timespan, multiplier, unit, _, max_scale = HIST_TEMPLATES[
-        template
-    ]
-    is_intraday = timespan != 'day'
-    df = fetch_hist(
-        client,
-        symbol,
-        timespan,
-        multiplier,
-        unit,
-        max_scale,
-        close_only=not is_intraday,
-        open_close_only=is_intraday,
-    )
-    if is_intraday:
-        return df.rename(
-            {
-                'open': f'{symbol}_open',
-                'close': symbol,
-            }
-        )
-    return df.rename({'close': symbol})

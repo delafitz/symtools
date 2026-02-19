@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, AsyncGenerator
 
 from pydantic import BaseModel
 
-from app.mds.quote import get_symbol_quote
 from app.services.hist import build_basket_hists
 from app.services.prices import (
     HIST_TEMPLATES,
@@ -39,7 +38,7 @@ async def stream_symbol(
 
     # Fire independent tasks in parallel
     quote_task = asyncio.create_task(
-        get_symbol_quote(cache.mds, symbol)
+        asyncio.to_thread(cache.mds.get_quote, symbol)
     )
     prices_task = asyncio.create_task(
         PriceService.create(cache, symbol)

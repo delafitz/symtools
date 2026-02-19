@@ -1,5 +1,3 @@
-import asyncio
-
 import polars as pl
 from massive import RESTClient
 
@@ -9,12 +7,6 @@ from app.utils.logger import get_logger
 from app.utils.market import get_session
 
 log = get_logger(__name__)
-
-
-async def get_symbol_quote(
-    client: RESTClient, symbol: str
-) -> SymbolQuote:
-    return await asyncio.to_thread(fetch_quote, client, symbol)
 
 
 def fetch_quote(client: RESTClient, symbol: str) -> SymbolQuote:

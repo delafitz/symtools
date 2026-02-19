@@ -1,13 +1,15 @@
 import asyncio
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import polars as pl
 
-from app.mds.hist import fetch_hist_template
 from app.models.hist import BasketHist, HistStats
 from app.services.prices import HIST_TEMPLATES
 from app.services.tracking import TrackingResult
 from app.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from app.mds.provider import MarketDataProvider
 
 log = get_logger(__name__)
 
@@ -100,7 +102,7 @@ def build_basket_hists(
 
 
 async def load_symbol_series(
-    client,
+    mds: 'MarketDataProvider',
     symbol: str,
     existing: dict[str, pl.DataFrame],
     on_update: Callable[[str, str, pl.DataFrame], None],
@@ -114,8 +116,7 @@ async def load_symbol_series(
         if template in existing:
             continue
         hist = await asyncio.to_thread(
-            fetch_hist_template,
-            client,
+            mds.get_hist_template,
             symbol,
             template,
         )
@@ -123,14 +124,13 @@ async def load_symbol_series(
 
 
 async def load_symbol_template(
-    client,
+    mds: 'MarketDataProvider',
     symbol: str,
     template: str,
 ) -> pl.DataFrame:
     """Load a single template for a symbol."""
     return await asyncio.to_thread(
-        fetch_hist_template,
-        client,
+        mds.get_hist_template,
         symbol,
         template,
     )

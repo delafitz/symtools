@@ -97,13 +97,10 @@ class PriceService:
         if self._daily is None:
             return False
 
-        from app.mds.hist import fetch_hist
-
         today = last_trading_day().strftime(DT_FMT)
 
         fresh = await asyncio.to_thread(
-            fetch_hist,
-            self._cache.mds,
+            self._cache.mds.get_hist,
             symbol,
             'day',
             1,

@@ -1,21 +1,14 @@
 import asyncio
 from datetime import date
 from time import perf_counter
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import polars as pl
 
-from app.mds.float import fetch_free_float
-from app.mds.hist import fetch_hist_template
-from app.mds.short_interest import fetch_short_interest
+from app.mds.polygon.refs import REF_SCHEMA
 from app.services.prices import (
     HIST_TEMPLATE_DEFAULT,
     HIST_TEMPLATES,
-)
-from app.mds.refs import (
-    REF_SCHEMA,
-    fetch_ticker_details,
-    list_tickers,
 )
 from app.utils.groups import (
     TYPE_STOCK,
@@ -24,6 +17,9 @@ from app.utils.groups import (
 )
 from app.utils.logger import get_logger
 from app.utils.store import get_store, write_store
+
+if TYPE_CHECKING:
+    from app.mds.provider import MarketDataProvider
 
 log = get_logger(__name__)
 
@@ -34,11 +30,6 @@ REFS_SCHEMA = {
     **REF_SCHEMA,
     'type': pl.String,
 }
-
-
-def get_ticker_list(client, max_count: int) -> pl.DataFrame:
-    """Fast startup: get ticker symbols only."""
-    return list_tickers(client, max_count)
 
 
 def get_cached_refs() -> pl.DataFrame | None:
@@ -52,7 +43,7 @@ def get_cached_hists() -> pl.DataFrame | None:
 
 
 async def load_refs_async(
-    client,
+    mds: 'MarketDataProvider',
     tickers: pl.DataFrame,
     on_refs_update: Callable[[pl.DataFrame], None],
     on_hists_update: Callable[[pl.DataFrame], None],
@@ -92,9 +83,7 @@ async def load_refs_async(
         async with semaphore:
             try:
                 details = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        fetch_ticker_details, client, symbol
-                    ),
+                    asyncio.to_thread(mds.get_details, symbol),
                     timeout=10.0,
                 )
                 details_done += 1
@@ -201,14 +190,12 @@ async def load_refs_async(
                 float_data, si_data = await asyncio.wait_for(
                     asyncio.gather(
                         asyncio.to_thread(
-                            fetch_free_float,
-                            client,
+                            mds.get_float,
                             row['symbol'],
                             True,
                         ),
                         asyncio.to_thread(
-                            fetch_short_interest,
-                            client,
+                            mds.get_short_interest,
                             row['symbol'],
                             True,
                         ),
@@ -284,8 +271,7 @@ async def load_refs_async(
             try:
                 hist = await asyncio.wait_for(
                     asyncio.to_thread(
-                        fetch_hist_template,
-                        client,
+                        mds.get_hist_template,
                         symbol,
                         HIST_TEMPLATE_DEFAULT,
                         True,
@@ -338,8 +324,7 @@ async def load_refs_async(
             try:
                 hist = await asyncio.wait_for(
                     asyncio.to_thread(
-                        fetch_hist_template,
-                        client,
+                        mds.get_hist_template,
                         symbol,
                         template,
                         True,
