@@ -20,7 +20,12 @@ uv run basedpyright
 
 ## Environment Variables
 
-- `POLYGON_API_KEY` - Required for market data access via Polygon.io API (using `massive` client)
+**Polygon provider** (active):
+- `POLYGON_API_KEY` - Required for Polygon.io API (using `massive` client)
+
+**Bloomberg provider** (stub):
+- `BLOOMBERG_HOST` - B-PIPE or Terminal host (default `localhost`)
+- `BLOOMBERG_PORT` - blpapi port (default `8194`)
 
 ## Architecture Overview
 
@@ -32,7 +37,11 @@ Symtools is a FastAPI-based financial analytics server providing portfolio optim
 - `app/server/` - HTTP layer (router.py endpoints, cache.py in-memory storage)
 - `app/services/` - Business logic (prices, refs, hist, cost, baskets/, alerts/)
 - `app/models/` - Pydantic request/response models
-- `app/mds/` - Market data service (massive client, formerly polygon-api-client)
+- `app/mds/` - Market data provider layer (see MDS Provider Architecture below)
+  - `provider.py` - `MarketDataProvider` Protocol (abstract contract)
+  - `client.py` - `get_provider()` factory (single swap point)
+  - `polygon/` - Polygon.io provider (`massive` RESTClient)
+  - `bloomberg/` - Bloomberg provider stub (`blpapi`)
 - `app/utils/` - Helpers (store.py for parquet caching, trie.py for symbol search, groups.py for ETF lists and scenario defs)
 - `data/` - Parquet cache files (date-stamped: `*.YYYYMMDD.parquet`)
 
@@ -86,6 +95,52 @@ Runs 4 phases sequentially, each using the shared semaphore for concurrent API c
 - `on_refs_update(refs)` - Updates `cache.refs` and rebuilds Trie
 - `on_hists_update(hists)` - Updates unified `cache.hists` DataFrame
 
+### MDS Provider Architecture
+
+The market data layer uses a Protocol-based adapter pattern. All providers implement the same `MarketDataProvider` interface; swapping providers requires changing only `app/mds/client.py:get_provider()`.
+
+**Protocol** (`app/mds/provider.py`):
+```python
+class MarketDataProvider(Protocol):
+    def list_tickers(max_count) -> pl.DataFrame
+    def get_details(symbol) -> dict | None
+    def get_quote(symbol) -> SymbolQuote
+    def get_hist(symbol, timespan, multiplier, unit, scale, ...) -> pl.DataFrame
+    def get_hist_template(symbol, template, ...) -> pl.DataFrame
+    def get_float(symbol, ...) -> dict | None
+    def get_short_interest(symbol, ...) -> dict | None
+```
+
+All provider methods are **sync**. Callers wrap in `asyncio.to_thread()` for async usage.
+
+**Polygon provider** (`app/mds/polygon/`) — active:
+- `__init__.py` — `PolygonProvider` facade, delegates to sub-modules
+- `quote.py` — `fetch_quote()` via `massive` REST snapshots + minute bars for session detection
+- `hist.py` — `fetch_hist()` / `fetch_hist_template()` via aggs endpoint; shared OHLCV schemas (`OHLCV_BASE_SCHEMA`, `CLOSE_SCHEMA`, `OPEN_CLOSE_SCHEMA`)
+- `refs.py` — `list_tickers()` / `fetch_ticker_details()` via tickers endpoint; shared `TICKER_SCHEMA`, `REF_SCHEMA`
+- `float.py` — `fetch_free_float()` via vX shares/float endpoint
+- `short_interest.py` — `fetch_short_interest()` via vX short-interest endpoint
+
+**Bloomberg provider** (`app/mds/bloomberg/`) — stub:
+- `__init__.py` — `BloombergProvider` facade, delegates to sub-modules with `self._session`
+- `session.py` — `create_session()`, `collect()` event loop yielding `msg.toPy()` dicts, `sec()` ticker → `"AAPL US Equity"` mapping
+- `quote.py` — `ReferenceDataRequest` snapshot; pre/post detection via `PRE_MKT_LAST_PRICE`/`AFTER_MKT_LAST_PRICE` fields (vs Polygon's timestamp-based approach)
+- `hist.py` — daily via `HistoricalDataRequest`, intraday via `IntradayBarRequest`; normalizes to shared OHLCV schemas
+- `refs.py` — ticker bootstrapping via `INDX_MEMBERS` on `RAY Index`; `fetch_details`/`fetch_float`/`fetch_short_interest` via batched `ReferenceDataRequest`
+
+**Key provider differences:**
+
+| Aspect | Polygon | Bloomberg |
+|--------|---------|-----------|
+| Ticker universe | `/v3/reference/tickers` endpoint | Index membership (`INDX_MEMBERS`) bootstrapping |
+| Quote session | Timestamp-based from minute bars | Dedicated `PRE_MKT_LAST_PRICE` / `AFTER_MKT_LAST_PRICE` fields |
+| Intraday hist | Multi-symbol via aggs endpoint | Single-security `IntradayBarRequest` |
+| VWAP (daily) | Direct `vw` field | Direct `VWAP` field |
+| VWAP (intraday) | Direct `vw` field | Derived: `value / volume` |
+| Field scaling | Raw values | `EQY_SH_OUT`, `CUR_MKT_CAP`, `EQY_FLOAT` in millions (×1e6) |
+| Short interest | Dedicated SI endpoint | `ReferenceDataRequest` with SI fields |
+| Auth | API key (`POLYGON_API_KEY`) | B-PIPE/Terminal session (`BLOOMBERG_HOST`:`BLOOMBERG_PORT`) |
+
 ### Key Patterns
 
 - **Pydantic models with formatting metadata** - Uses `Fmt` enum and `fp()` decorator in `app/utils/models.py` to attach display hints (valueFormat, metaLabel) for UI rendering
@@ -132,7 +187,7 @@ Owns daily (Y) hist data, template routing, SymbolHist response building, and pr
 1. Today's bar missing from `_daily` (data not yet available when loaded pre-open)
 2. `_loaded_at` older than `DAILY_DEFAULT_TTL` (300s / 5 min)
 
-When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merges into `_daily`, and recomputes `pct_return`.
+When stale, `refresh_today(symbol)` fetches today's daily bar via the provider, merges into `_daily`, and recomputes `pct_return`.
 
 **Intraday refresh**: W/D hists are re-fetched by `cache.get_hist_async` when age > `INTRADAY_TTL` (120s). This is transparent — callers get fresh data without any code change. The stream pre-fetch (step 6) also refreshes stale basket-constituent W/D hists.
 
@@ -180,9 +235,9 @@ When stale, `refresh_today(symbol)` fetches today's daily bar via Polygon, merge
 | `market` | 9:30 AM – 4:00 PM |
 | `post` | 4:00 PM – 11:59 PM |
 
-Session classification via `get_session(ts_ms)` on the Polygon quote timestamp. Hist responses have no session field — session awareness is embedded in date range logic (see intraday stats above).
+Session classification via `get_session(ts_ms)` on the quote timestamp (Polygon uses trade timestamps; Bloomberg uses dedicated pre/post fields). Hist responses have no session field — session awareness is embedded in date range logic (see intraday stats above).
 
-**Quote Fields by Session** (`app/mds/quote.py`):
+**Quote Fields by Session** (`app/mds/polygon/quote.py`):
 
 | Field | closed | pre | market | post |
 |---|---|---|---|---|
@@ -275,5 +330,10 @@ SSE events use `model_dump(by_alias=True)` → camelCase, matching REST endpoint
 - `app/utils/trie.py` - `insert()`, `prefix_search()` lack types
 - `app/utils/corp.py` - `strip_name()` lacks types
 - `app/utils/timing.py` - `timeit()` decorator lacks types
-- `app/mds/refs.py` - `list_tickers()`, `fetch_ticker_details()` partial types
+- `app/mds/polygon/refs.py` - `list_tickers()`, `fetch_ticker_details()` partial types
 - `app/server/cache.py` - `get_refs()` → `list[dict]`, `get_ref()` → `dict | None` (not yet models)
+
+### Bloomberg Provider
+
+- `blpapi` is not installed in the project — Bloomberg modules are stubs only and cannot be type-checked or run
+- Bloomberg schemas import from `app.mds.polygon.hist` / `app.mds.polygon.refs` — could be extracted to a shared location if both providers become active
