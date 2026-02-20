@@ -1,0 +1,14 @@
+low_liquidity, LowADV
+high_turnover, HighADV
+high_vol, HighVol
+vol_disperse, VolTerm
+vol_change, VolMove
+sigma_move_1d, Sig1D
+sigma_move_3d, Sig3D
+sigma_move_5d, Sig5D 
+poor_index_hedge, LowIndex
+no_good_hedges, LowBaskets
+size_pct_float, PctFloat
+high_adv_multiple, xADV
+override_vol_mismatch, VolOver
+override_adv_mismatch, ADVOver
