@@ -25,10 +25,12 @@ def build_analytics(
     """Build analytics from hist data."""
     vol, vol_table = get_vols(hist)
     adv, adv_table = get_advs(hist)
+    sigma = vol / DAILY_ANN
     return SymbolAnalytics.model_validate(
         {
             'symbol': symbol,
             'vol': vol,
+            'sigma': sigma,
             'adv': adv,
             'hist_vol': vol_table,
             'hist_adv': adv_table,

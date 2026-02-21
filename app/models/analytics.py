@@ -15,6 +15,7 @@ class SymbolAnalytics(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
     vol: float = f(Fmt.vol)
+    sigma: float = f(Fmt.ratio)
     adv: float = f(Fmt.volume)
     hist_vol: dict[str, TermStruct] = fp(
         'HistVol', Fmt.vol, '5d', Fmt.meta

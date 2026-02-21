@@ -43,4 +43,5 @@ quote-style="single"
 reportMissingImports = "error"
 reportMissingTypeStubs = false
 typeCheckingMode = "off"
+ignore = ["app/mds/bloomberg"]
 

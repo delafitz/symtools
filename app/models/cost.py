@@ -17,10 +17,10 @@ class VolTimeCalcs(BaseModel):
 
 class VolTimeStats(BaseModel):
     model_config = config()
-    pct_mkt_cap: float = f(Fmt.pct, '%MktCap')
-    pct_float: float = f(Fmt.pct, '%Float')
+    pct_mkt_cap: float = f(Fmt.ratio, 'MktCap')
+    pct_float: float = f(Fmt.ratio, 'Float')
     xadv: float = f(Fmt.ratio, 'xADV')
-    sigma: float = f(Fmt.pct)
+    sigma: float = f(Fmt.ratio)
 
 
 class SymbolCostCalcs(BaseModel):

@@ -18,7 +18,7 @@ class ColorFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         level = record.levelname
         time = self.formatTime(record, self.datefmt)
-        module = record.module
+        module = record.name.rsplit('.', 1)[-1]
         message = record.getMessage()
 
         colored_level = click.style(
