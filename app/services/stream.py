@@ -114,7 +114,7 @@ async def stream_symbol(
                         f'{symbol} basket_hist '
                         f'{bh.template} '
                         f'{bh.basket} '
-                        f'bars={len(bh.bars)}'
+                        f'bars={len(bh.weighted)}'
                     )
                     yield ('basket_hist', bh)
             else:
@@ -188,7 +188,7 @@ async def stream_symbol(
                         f'{symbol} basket_hist '
                         f'{bh.template} '
                         f'{bh.basket} '
-                        f'bars={len(bh.bars)}'
+                        f'bars={len(bh.weighted)}'
                     )
                     yield ('basket_hist', bh)
             else:
