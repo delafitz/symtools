@@ -35,7 +35,7 @@ Symtools is a FastAPI-based financial analytics server providing portfolio optim
 
 - `app/main.py` - FastAPI application entry point
 - `app/server/` - HTTP layer (router.py endpoints, cache.py in-memory storage)
-- `app/services/` - Business logic (prices, refs, hist, cost, baskets/, alerts/)
+- `app/services/` - Business logic (prices, quotes, refs, hist, cost, baskets/, alerts/)
 - `app/models/` - Pydantic request/response models
 - `app/mds/` - Market data provider layer (see MDS Provider Architecture below)
   - `provider.py` - `MarketDataProvider` Protocol (abstract contract)
@@ -170,33 +170,45 @@ All routes defined in `app/server/router.py`:
 - `cardinality`: int = 4 (max non-zero weights)
 - `l1_coef`: float = 1e-5 (L1 regularization)
 
+### QuoteService (`app/services/quotes.py`)
+
+Owns all quote fetching with TTL-based caching. Quotes are the single source of truth for `end_price` across the entire snapshot and hist pipeline.
+
+```python
+QUOTE_TTL = 300  # 5 min
+
+class QuoteService:
+    async def get(symbol) -> SymbolQuote
+    async def get_many(symbols) -> dict[str, SymbolQuote]
+```
+
+- `get()` — returns cached quote if within TTL, otherwise fetches via `asyncio.to_thread(mds.get_quote, symbol)`
+- `get_many()` — batch fetch, identifies stale symbols and fetches them in parallel via `asyncio.gather`
+- Initialized once on `Cache.__init__` as `cache.quote_svc`
+- `cache.get_quote(symbol)` delegates to `quote_svc.get(symbol)`
+
 ### PriceService (`app/services/prices.py`)
 
-Owns daily (Y) hist data, template routing, SymbolHist response building, and price lookups. Single entry point for all hist-related operations during a snapshot or `/hist` request.
+Owns daily (Y) hist data, template routing, and SymbolHist response building. Stateless — no mutable data, no refresh logic. Y daily data is treated as immutable T-1 data; live pricing comes from the quote.
 
-**Factory**: `PriceService.create(cache, symbol)` — async classmethod that loads Y hist from cache, constructs the service, and refreshes stale data if needed. Returns `None` if no Y data exists.
+**Factory**: `PriceService.create(cache, symbol)` — async classmethod that loads Y hist from cache. Returns `None` if no Y data exists. No refresh, no TTL tracking.
 
 **Template routing** via `prices.hist(symbol, template)`:
 - `Y` → stored daily bars (`self._daily`)
 - `M` → sliced from Y (`slice_hist(daily, 'months', 6)`) — no separate API fetch
 - `W`/`D` → delegated to `cache.get_hist_async`
 
-**Response building**: `prices.build_response(symbol, template, scale)` → `SymbolHist`. Calls `hist()` then `_build_hist()` internally. Computes per-scale stats (1 through max_scale), daily_aggs for intraday, and bar data at max_scale resolution. Client slices visible bars via stats lookups.
+**Response building**: `prices.build_response(symbol, template, end_price, scale)` → `SymbolHist`. Takes `end_price` from the caller (derived from quote). Computes per-scale stats (1 through max_scale), daily_aggs for intraday, and bar data at max_scale resolution.
 
-**Daily refresh**: On market hours, `needs_refresh` checks two conditions:
-1. Today's bar missing from `_daily` (data not yet available when loaded pre-open)
-2. `_loaded_at` older than `DAILY_DEFAULT_TTL` (300s / 5 min)
-
-When stale, `refresh_today(symbol)` fetches today's daily bar via the provider, merges into `_daily`, and recomputes `pct_return`.
+**`end_price_from_quote(quote)`** — module-level function, returns `quote.close`. This is the single source of truth for `end_price`. Callers (stream.py, router.py) fetch the quote first, extract `end_price`, and pass it to `build_response()`.
 
 **Intraday refresh**: W/D hists are re-fetched by `cache.get_hist_async` when age > `INTRADAY_TTL` (120s). This is transparent — callers get fresh data without any code change. The stream pre-fetch (step 6) also refreshes stale basket-constituent W/D hists.
 
-**Price lookups** (all operate on `_daily`):
-- `close(date_str)` — daily close for a date
-- `prev_close(before)` → `(prev_date, prev_close)` for last bar before a date
-- `vwap(start, end)` — volume-weighted avg price; caps range to available daily data so intraday end dates beyond the last daily bar still return a value
-- `daily_aggs(start, end)` — daily-bar slice for intraday overlay with prev close anchor
-- `end_price(end_str, hist)` — best end price: daily close → market-close bar → last bar
+**Price helpers** (module-level, operate on a `daily: pl.DataFrame` argument):
+- `_close(daily, date_str)` — daily close for a date
+- `_prev_close(daily, before)` → `(prev_date, prev_close)` for last bar before a date
+- `_vwap(daily, start, end)` — volume-weighted avg price; caps range to available daily data
+- `_daily_aggs(daily, start, end)` — daily-bar slice for intraday overlay with prev close anchor
 
 ### Hist Features
 
@@ -220,12 +232,18 @@ When stale, `refresh_today(symbol)` fetches today's daily bar via the provider, 
 - `range_vwap`: Volume-weighted avg price from start to end (from daily data).
 - `range_pct_return`: `end_price / prev_close - 1`.
 
-**Intraday stats date logic** (`PriceService._intraday_end`):
-- `end_date` = today if market has opened (>= 9:30 AM ET), else prior trading day
-- `end_price` = daily close from Y hist, or market close bar as fallback
+**Intraday stats date logic** (inline in `PriceService._build_hist`):
+- `end_date` = today if market has opened (>= 9:30 AM ET), else prior trading day (clock-driven)
+- `end_price` = `quote.close` via `end_price_from_quote()` (passed in from caller)
 - `start_date` = `weekdays_back(end, scale - 1)` for D, `weekdays_back(end, scale * 5 - 1)` for W
 - `prev_date` = `prev_weekday(start_date)`
-- Bar data may include pre-session bars beyond `end_date`; stats reflect finalized daily closes.
+- Bar data may include pre-session bars beyond `end_date`; stats reflect the quote's live price.
+
+**end_price by session** (via `quote.close`):
+- Pre-market: `quote.close` = prev close → `end_date` = prev trading day. Stats show T-1 returns.
+- Market hours: `quote.close` = running close → `end_date` = today. Stats show live intraday return.
+- Post-market: `quote.close` = official close → `end_date` = today. Stats show finalized daily return.
+- Daily templates (Y/M): bars end at T-1, `end_price` from quote is today's price. Stats show live return through today even though bars stop yesterday.
 
 **Market Sessions** (`app/utils/market.py`):
 | Session | Window (ET) |
@@ -285,6 +303,8 @@ Rule-based signals evaluated from symbol data. Decorator-based registry: `@rule(
 - `/cost` endpoint: cost-category alerts included in `SymbolCostCalcs.alerts`
 
 **Cache** (`app/server/cache.py`):
+- `quote_svc: QuoteService` — TTL-cached quote fetching, initialized on `Cache.__init__`
+- `get_quote(symbol)` — delegates to `quote_svc.get(symbol)`
 - Unified hists: `self.hists` — single Polars DataFrame with `symbol`/`template` columns, all templates concatenated
 - `get_hist(symbol, template)` — sync, filters unified hists, drops metadata columns
 - `get_hist_async(symbol, template)` — async, fetches from API if not cached or stale, adds to unified hists
@@ -304,11 +324,12 @@ Rule-based signals evaluated from symbol data. Decorator-based registry: `@rule(
 Services return Pydantic models directly — no `model_validate` at call sites:
 - `build_analytics()` → `SymbolAnalytics`
 - `fetch_quote()` → `SymbolQuote`
+- `QuoteService.get()` → `SymbolQuote` (TTL-cached)
 - `calc_costs()` → `SymbolCostCalcs | None`
 - `BasketService.build/get()` → `SymbolBaskets | None`
 - `cache.search_token()` → `list[SearchResult]`
 - `cache.get_analytics()` → `SymbolAnalytics | None`
-- `cache.get_quote()` → `SymbolQuote`
+- `cache.get_quote()` → `SymbolQuote` (delegates to QuoteService)
 - `cache.get_costs()` → `SymbolCostCalcs | None`
 - `cache.get_baskets()` → `SymbolBaskets | None`
 - `evaluate()` → `SymbolAlerts | None`

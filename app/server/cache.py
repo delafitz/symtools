@@ -6,6 +6,7 @@ import polars as pl
 
 from app.mds.client import get_provider
 from app.models.analytics import SymbolAnalytics
+from app.services.quotes import QuoteService
 from app.models.baskets import SymbolBaskets
 from app.models.cost import SymbolCostCalcs
 from app.models.inputs import SymbolOverrides
@@ -42,6 +43,7 @@ class Cache:
 
     def __init__(self) -> None:
         self.mds = get_provider()
+        self.quote_svc = QuoteService(self.mds)
         self.refs: pl.DataFrame | None = None
         self.hists: pl.DataFrame | None = None
         self.tickers: pl.DataFrame | None = None
@@ -387,7 +389,7 @@ class Cache:
         return await calc_costs(self, overrides)
 
     async def get_quote(self, symbol: str) -> SymbolQuote:
-        return await asyncio.to_thread(self.mds.get_quote, symbol)
+        return await self.quote_svc.get(symbol)
 
     def search_token(
         self, token: str, length: int = SEARCH_LEN

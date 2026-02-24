@@ -8,6 +8,7 @@ from app.services.prices import (
     HIST_TEMPLATE_DEFAULT,
     HIST_TEMPLATES,
     PriceService,
+    end_price_from_quote,
 )
 from app.models.analytics import SymbolAnalytics
 from app.models.baskets import SymbolBaskets
@@ -163,10 +164,14 @@ async def get_hist(
         scale = default_scale
     scale = max(1, min(scale, max_scale))
     cache = request.state.cache
+    quote = await cache.get_quote(symbol)
+    end_price = end_price_from_quote(quote)
     prices = await PriceService.create(cache, symbol)
     if prices is None:
         return None
-    return await prices.build_response(symbol, template, scale)
+    return await prices.build_response(
+        symbol, template, end_price, scale
+    )
 
 
 @router.get(

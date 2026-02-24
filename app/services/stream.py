@@ -7,6 +7,7 @@ from app.services.hist import build_basket_hists
 from app.services.prices import (
     HIST_TEMPLATES,
     PriceService,
+    end_price_from_quote,
 )
 from app.services.tracking import (
     compute_tracking_for_template,
@@ -37,9 +38,7 @@ async def stream_symbol(
         return
 
     # Fire independent tasks in parallel
-    quote_task = asyncio.create_task(
-        asyncio.to_thread(cache.mds.get_quote, symbol)
-    )
+    quote_task = asyncio.create_task(cache.get_quote(symbol))
     prices_task = asyncio.create_task(
         PriceService.create(cache, symbol)
     )
@@ -48,12 +47,13 @@ async def stream_symbol(
     # 1. Quote
     quote = await quote_task
     yield ('quote', quote)
+    end_price = end_price_from_quote(quote)
 
     # 2. Prices + Y hist
     prices = await prices_task
     if prices is None:
         return
-    y_resp = await prices.build_response(symbol, 'Y')
+    y_resp = await prices.build_response(symbol, 'Y', end_price)
     if y_resp is None:
         return
     log.yellow(
@@ -107,6 +107,8 @@ async def stream_symbol(
                     'Y',
                     y_tracking,
                     y_resp.stats,
+                    baskets,
+                    cache.hists,
                 ):
                     log.yellow(
                         f'{symbol} basket_hist '
@@ -138,7 +140,9 @@ async def stream_symbol(
 
     # 7. M / W / D hists + basket_hists
     for template in ['M', 'W', 'D']:
-        resp = await prices.build_response(symbol, template)
+        resp = await prices.build_response(
+            symbol, template, end_price
+        )
         if resp is None:
             continue
         log.yellow(
@@ -177,6 +181,8 @@ async def stream_symbol(
                     template,
                     tracking,
                     resp.stats,
+                    baskets,
+                    cache.hists,
                 ):
                     log.yellow(
                         f'{symbol} basket_hist '
