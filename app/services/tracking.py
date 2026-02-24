@@ -17,6 +17,7 @@ log = get_logger(__name__)
 class TrackingResult:
     series: pl.DataFrame
     scenarios: list[str]
+    symbol_series: dict[str, pl.DataFrame]
 
 
 def _get_symbol_closes(
@@ -88,6 +89,7 @@ def compute_tracking_for_template(
 
     tracking_series = hist.select(series_cols)
     scenarios: list[str] = []
+    symbol_series: dict[str, pl.DataFrame] = {}
 
     # Pre-fetch all basket symbol closes for this template
     all_syms: set[str] = set()
@@ -155,6 +157,12 @@ def compute_tracking_for_template(
             (weighted_expr / total_weight).alias(name)
         )
 
+        # Capture per-symbol returns
+        sym_df = hist_with_baskets.select(
+            series_cols + [f'{sym}_ret' for sym in available_syms]
+        ).rename({f'{sym}_ret': sym for sym in available_syms})
+        symbol_series[name] = sym_df
+
         # Add to tracking series
         basket_series = hist_with_baskets.select(series_cols + [name])
         tracking_series = tracking_series.join(
@@ -173,8 +181,13 @@ def compute_tracking_for_template(
         tracking_series = tracking_series.filter(
             pl.col('date') >= start_date
         )
+        for k in symbol_series:
+            symbol_series[k] = symbol_series[k].filter(
+                pl.col('date') >= start_date
+            )
 
     return TrackingResult(
         series=tracking_series,
         scenarios=scenarios,
+        symbol_series=symbol_series,
     )

@@ -77,4 +77,5 @@ class BasketHist(HistBase):
 
     basket: str
     stats: dict[int, HistStats]
-    bars: list[TrackingBar]
+    weighted: list[TrackingBar]
+    symbols: dict[str, list[TrackingBar]]

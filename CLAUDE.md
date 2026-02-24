@@ -279,9 +279,10 @@ Close resolution: `day.close > prev_day.close`
 1. For each scenario, join basket symbol closes from unified `cache.hists` to symbol hist on date/timestamp
 2. Forward-fill + backward-fill nulls
 3. Compute pct_change per basket symbol
-4. Weighted average return per bar → returns `TrackingResult(series, scenarios)`
-5. `build_basket_hists` splits into `BasketHist` per scenario with per-scale `stats` (dates from parent, `end_price`/`range_pct_return` cumulated from bar returns, `range_vwap` = null)
-6. Series is rebased against `prev_close` from hist stats, so first bar has a non-zero return
+4. Per-symbol `pct_return` columns stored in `TrackingResult.symbol_series` (dict[scenario, DataFrame])
+5. Weighted average return per bar → returns `TrackingResult(series, scenarios, symbol_series)`
+6. `build_basket_hists` splits into `BasketHist` per scenario with per-scale `stats` (dates from parent, `end_price`/`range_pct_return` cumulated from weighted returns, `range_vwap` = null), `weighted` (weighted-average tracking bars), and `symbols` (per-hedge-symbol return bars)
+7. Series is rebased against `prev_close` from hist stats, so first bar has a non-zero return
 
 **Timestamp Alignment**: Intraday timestamps rounded to bar boundaries (`round_ts` in `app/utils/dates.py`) for consistent joins across symbols.
 
