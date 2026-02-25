@@ -6,7 +6,8 @@ from app.services.prices import (
     HIST_TEMPLATE_DEFAULT,
     HIST_TEMPLATES,
 )
-from app.services.baskets.factors import FactorModel
+from app.services.baskets.barra import BarraModel
+from app.services.baskets.factors import EmpModel
 from app.utils.market import slice_hist
 from app.utils.groups import (
     FACTORS,
@@ -34,6 +35,8 @@ PRESCREEN_MULT = 3
 # Composite score weights
 FACTOR_WEIGHT = 0.7
 CORR_WEIGHT = 0.3
+# Barra distance bonus for same-sector candidates
+SECTOR_BONUS = 0.5
 
 
 def get_returns(hists: pl.DataFrame) -> pl.DataFrame:
@@ -98,56 +101,26 @@ def _filter_hists_wide(
     return wide if not wide.is_empty() else None
 
 
-def _get_factor_candidates(
-    symbol: str,
-    factor_model: FactorModel,
+def _refine_by_correlation(
+    prescreen: list[tuple[str, float]],
     hists: pl.DataFrame,
     target_returns: pl.DataFrame,
     template: str,
-    max_count: int = MAX_SINGLES,
+    max_count: int,
 ) -> list[str]:
-    """Pre-screen by factor distance, refine with corr.
+    """Stage 2: correlation refinement + composite score.
 
-    Stage 1: Rank all stocks by factor loading distance,
-    take top PRESCREEN_MULT * max_count.
-    Stage 2: Compute correlation with target returns.
-    Composite: 0.7 * norm_factor_dist + 0.3 * (1 - corr).
-    Return top max_count by composite score.
+    Takes pre-screened (symbol, distance) pairs sorted by
+    distance, computes correlation with target returns,
+    and returns top max_count by composite score.
     """
-    target_smb = factor_model.smb.exposures.get(symbol)
-    target_tv = factor_model.turnover.exposures.get(symbol)
-    if not target_smb or not target_tv:
-        return []
+    prescreen_syms = [s for s, _ in prescreen]
+    factor_dists = {s: d for s, d in prescreen}
 
-    # Stage 1: factor distance ranking
-    prescreen_count = max_count * PRESCREEN_MULT
-    all_dists = []
-    for s in factor_model.smb.exposures:
-        if s == symbol:
-            continue
-        smb_exp = factor_model.smb.exposures[s]
-        tv_exp = factor_model.turnover.exposures.get(s)
-        if not tv_exp:
-            continue
-        dist = abs(smb_exp.loading - target_smb.loading) + abs(
-            tv_exp.loading - target_tv.loading
-        )
-        all_dists.append((s, dist))
-
-    all_dists.sort(key=lambda x: x[1])
-    prescreened = all_dists[:prescreen_count]
-    if not prescreened:
-        return []
-
-    prescreen_syms = [s for s, _ in prescreened]
-    factor_dists = {s: d for s, d in prescreened}
-
-    # Normalize factor distances to [0, 1]
-    min_fd = prescreened[0][1]
-    max_fd = prescreened[-1][1]
+    min_fd = prescreen[0][1]
+    max_fd = prescreen[-1][1]
     fd_range = max_fd - min_fd
 
-    # Stage 2: correlation with target
     cand_hists = hists.filter(
         (pl.col('symbol').is_in(prescreen_syms))
         & (pl.col('template') == template)
@@ -180,7 +153,6 @@ def _get_factor_candidates(
             if c is not None:
                 corrs[s] = c
 
-    # Composite score
     scored = []
     for s in prescreen_syms:
         fd = factor_dists[s]
@@ -196,6 +168,100 @@ def _get_factor_candidates(
 
     scored.sort(key=lambda x: x[1])
     return [s for s, _ in scored[:max_count]]
+
+
+def _get_emp_candidates(
+    symbol: str,
+    emp_model: EmpModel,
+    hists: pl.DataFrame,
+    target_returns: pl.DataFrame,
+    template: str,
+    max_count: int = MAX_SINGLES,
+) -> list[str]:
+    """Pre-screen by factor distance, refine with corr.
+
+    Stage 1: Rank all stocks by factor loading distance,
+    take top PRESCREEN_MULT * max_count.
+    Stage 2: Correlation refinement via composite score.
+    """
+    target_smb = emp_model.smb.exposures.get(symbol)
+    target_tv = emp_model.turnover.exposures.get(symbol)
+    if not target_smb or not target_tv:
+        return []
+
+    prescreen_count = max_count * PRESCREEN_MULT
+    all_dists: list[tuple[str, float]] = []
+    for s in emp_model.smb.exposures:
+        if s == symbol:
+            continue
+        smb_exp = emp_model.smb.exposures[s]
+        tv_exp = emp_model.turnover.exposures.get(s)
+        if not tv_exp:
+            continue
+        dist = abs(smb_exp.loading - target_smb.loading) + abs(
+            tv_exp.loading - target_tv.loading
+        )
+        all_dists.append((s, dist))
+
+    all_dists.sort(key=lambda x: x[1])
+    prescreen = all_dists[:prescreen_count]
+    if not prescreen:
+        return []
+
+    return _refine_by_correlation(
+        prescreen, hists, target_returns, template, max_count
+    )
+
+
+def _get_barra_candidates(
+    symbol: str,
+    barra_model: BarraModel,
+    hists: pl.DataFrame,
+    target_returns: pl.DataFrame,
+    template: str,
+    max_count: int = MAX_SINGLES,
+) -> list[str]:
+    """Pre-screen by Barra exposure distance.
+
+    Stage 1: L1 norm over 6 z-scored style factors.
+    Same-sector bonus subtracted from distance.
+    Stage 2: Correlation refinement via composite score.
+    """
+    target_exp = barra_model.exposures.get(symbol)
+    if not target_exp:
+        return []
+
+    target_sector = target_exp.sector
+
+    prescreen_count = max_count * PRESCREEN_MULT
+    all_dists: list[tuple[str, float]] = []
+    for s, exp in barra_model.exposures.items():
+        if s == symbol:
+            continue
+        dist = (
+            abs(exp.size - target_exp.size)
+            + abs(exp.momentum - target_exp.momentum)
+            + abs(exp.reversal - target_exp.reversal)
+            + abs(exp.beta - target_exp.beta)
+            + abs(exp.resvol - target_exp.resvol)
+            + abs(exp.liquidity - target_exp.liquidity)
+        )
+        if (
+            target_sector
+            and exp.sector
+            and exp.sector == target_sector
+        ):
+            dist -= SECTOR_BONUS
+        all_dists.append((s, dist))
+
+    all_dists.sort(key=lambda x: x[1])
+    prescreen = all_dists[:prescreen_count]
+    if not prescreen:
+        return []
+
+    return _refine_by_correlation(
+        prescreen, hists, target_returns, template, max_count
+    )
 
 
 def _build_singles_wide(
@@ -278,15 +344,16 @@ def get_scenarios(
     hist: pl.DataFrame,
     refs: pl.DataFrame,
     hists: pl.DataFrame,
-    factor_model: FactorModel | None = None,
+    emp_model: EmpModel | None = None,
+    barra_model: BarraModel | None = None,
     template: str = HIST_TEMPLATE_DEFAULT,
     scale: int | None = None,
 ) -> dict[str, pl.DataFrame]:
     """Build scenario return matrices for optimization.
 
     Each scenario is an independent candidate pool.
-    Singles are pre-screened by factor quintile
-    proximity when factor_model is available.
+    Singles pre-screened by Barra exposures (preferred)
+    or factor quintile proximity when available.
     """
     _, _, unit, default_scale, _ = HIST_TEMPLATES[template]
     if scale is None:
@@ -349,12 +416,24 @@ def get_scenarios(
         else:
             log.warning(f'scenarios: {FACTORS} unavailable')
 
-    # Singles (factor pre-screened)
+    # Singles (pre-screened by Barra or factor model)
     include = None
-    if factor_model:
-        include = _get_factor_candidates(
+    if barra_model:
+        include = _get_barra_candidates(
             symbol,
-            factor_model,
+            barra_model,
+            hists,
+            target_returns,
+            template,
+        )
+        log.info(
+            f'scenarios: {SINGLES} barra pre-screen '
+            f'-> {len(include)} candidates'
+        )
+    elif emp_model:
+        include = _get_emp_candidates(
+            symbol,
+            emp_model,
             hists,
             target_returns,
             template,

@@ -4,7 +4,7 @@ from time import perf_counter
 import polars as pl
 from skfolio.measures import RiskMeasure
 from skfolio.optimization import MeanRisk, ObjectiveFunction
-from skfolio.prior import EmpiricalPrior
+from skfolio.prior import BasePrior, EmpiricalPrior
 
 from app.models.baskets import BasketParams
 from app.services.baskets.config import (
@@ -32,12 +32,16 @@ def run_opt(
     scenario: str,
     X,
     params: BasketParams = DEFAULT_PARAMS,
+    prior_estimator: BasePrior | None = None,
+    factor_returns=None,
+    groups: dict[str, list[str]] | None = None,
+    linear_constraints: list[str] | None = None,
 ):
     start = perf_counter()
     cols = X.shape[1]
 
     if cols > STAGE2_MIN_COLS:
-        # Stage 1: continuous relaxation (no cardinality/threshold)
+        # Stage 1: always EmpiricalPrior (fast pre-screen)
         stage1 = MeanRisk(
             solver='CLARABEL',
             prior_estimator=EmpiricalPrior(),
@@ -61,12 +65,34 @@ def run_opt(
             reverse=True,
         )[:STAGE1_TOPN]
         X = X[['target'] + [c for c, _ in top]]
+        # Re-filter groups/constraints to surviving cols
+        if groups is not None:
+            kept = set(X.columns)
+            groups = {s: g for s, g in groups.items() if s in kept}
+            if not groups:
+                groups = None
+                linear_constraints = None
+            elif linear_constraints is not None:
+                active = {g for gs in groups.values() for g in gs}
+                linear_constraints = [
+                    c
+                    for c in linear_constraints
+                    if c.split()[0] in active
+                ]
+                if not linear_constraints:
+                    linear_constraints = None
 
     # Stage 2 (or direct): MIP solve
+    prior = prior_estimator or EmpiricalPrior()
+    stage2_kw: dict = {}
+    if groups is not None:
+        stage2_kw['groups'] = groups
+    if linear_constraints is not None:
+        stage2_kw['linear_constraints'] = linear_constraints
     model = MeanRisk(
         solver='SCIP',
         solver_params={'limits/time': SOLVER_TIME_LIMIT},
-        prior_estimator=EmpiricalPrior(),
+        prior_estimator=prior,
         objective_function=ObjectiveFunction.MINIMIZE_RISK,
         risk_measure=RiskMeasure.VARIANCE,
         max_weights={'target': -1},
@@ -78,8 +104,12 @@ def run_opt(
         threshold_long=params.threshold_long,
         l1_coef=params.l1_coef,
         cardinality=params.cardinality,
+        **stage2_kw,
     )
-    model.fit(X)
+    if factor_returns is not None:
+        model.fit(X, factor_returns)
+    else:
+        model.fit(X)
     elapsed = perf_counter() - start
 
     weights = (
@@ -115,6 +145,10 @@ def run_opts(
     symbol: str,
     scenarios: dict[str, pl.DataFrame],
     params: dict[str, BasketParams] | None = None,
+    prior_estimator: BasePrior | None = None,
+    factor_returns=None,
+    groups: dict[str, dict[str, list[str]] | None] | None = None,
+    linear_constraints: dict[str, list[str] | None] | None = None,
 ):
     """Run optimization for each scenario.
 
@@ -122,8 +156,14 @@ def run_opts(
         symbol: Target symbol
         scenarios: Dict of scenario name -> returns DataFrame
         params: Optional dict of scenario name -> BasketParams overrides
+        prior_estimator: Optional prior (e.g. skfolio FactorModel)
+        factor_returns: Factor return series for prior
+        groups: Optional dict of scenario -> groups
+        linear_constraints: Optional dict of scenario -> constraints
     """
     params = params or {}
+    groups = groups or {}
+    linear_constraints = linear_constraints or {}
     results = {}
 
     for name, returns in scenarios.items():
@@ -133,6 +173,10 @@ def run_opts(
             name,
             returns.drop('date'),
             scenario_params,
+            prior_estimator=prior_estimator,
+            factor_returns=factor_returns,
+            groups=groups.get(name),
+            linear_constraints=linear_constraints.get(name),
         )
         results[name] = {
             'params': scenario_params,

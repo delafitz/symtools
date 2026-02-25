@@ -4,8 +4,16 @@ import polars as pl
 
 from app.services.prices import HIST_TEMPLATE_DEFAULT, HIST_TEMPLATES
 from app.models.baskets import Basket, BasketParams
-from app.services.baskets.factors import FactorModel
-from app.services.baskets.opt import run_opts
+from app.services.baskets.barra import (
+    BarraExposure,
+    BarraModel,
+    build_sector_constraints,
+    get_factor_returns,
+    get_prior,
+)
+from app.services.baskets.config import ModelChoice
+from app.services.baskets.factors import EmpModel
+from app.services.baskets.opt import DEFAULT_PARAMS, run_opts
 from app.services.baskets.risk import calc_stats
 from app.services.baskets.scenarios import (
     MIN_HIST,
@@ -21,27 +29,93 @@ def build_baskets(
     refs: pl.DataFrame,
     hists: pl.DataFrame,
     params: dict[str, BasketParams] | None = None,
-    factor_model: FactorModel | None = None,
+    emp_model: EmpModel | None = None,
+    barra_model: BarraModel | None = None,
+    model_choice: ModelChoice = 'emp',
 ) -> dict[str, Basket] | None:
     """Build basket optimizations for a symbol."""
-    scenarios = get_scenarios(symbol, hist, refs, hists, factor_model)
-    if scenarios:
+    if model_choice == 'barra':
+        scenarios = get_scenarios(
+            symbol,
+            hist,
+            refs,
+            hists,
+            barra_model=barra_model,
+        )
+    else:
+        scenarios = get_scenarios(
+            symbol,
+            hist,
+            refs,
+            hists,
+            emp_model=emp_model,
+        )
+
+    if not scenarios:
+        return None
+
+    # Barra: compute prior + sector constraints
+    if model_choice == 'barra' and barra_model:
+        prior = get_prior()
+
+        all_dates: list[str] = []
+        for returns in scenarios.values():
+            all_dates.extend(returns.get_column('date').to_list())
+        fr = get_factor_returns(barra_model, sorted(set(all_dates)))
+
+        target_sector = barra_model.exposures.get(
+            symbol,
+            BarraExposure(0, 0, 0, 0, 0, 0, ''),
+        ).sector
+        p = (params or {}).get(next(iter(scenarios)), DEFAULT_PARAMS)
+
+        sc_groups: dict[str, dict[str, list[str]] | None] = {}
+        sc_lin: dict[str, list[str] | None] = {}
+        for name, returns in scenarios.items():
+            columns = [
+                c
+                for c in returns.columns
+                if c not in ('date', 'target')
+            ]
+            sc = build_sector_constraints(
+                barra_model,
+                columns,
+                target_sector,
+                p.max_budget,
+            )
+            if sc:
+                sc_groups[name] = sc[0]
+                sc_lin[name] = sc[1]
+            else:
+                sc_groups[name] = None
+                sc_lin[name] = None
+
+        opts = run_opts(
+            symbol,
+            scenarios,
+            params,
+            prior_estimator=prior,
+            factor_returns=fr,
+            groups=sc_groups,
+            linear_constraints=sc_lin,
+        )
+    else:
         opts = run_opts(symbol, scenarios, params)
-        baskets: dict[str, Basket] = {}
-        for name, opt in opts.items():
-            if opt['weights'].is_empty():
-                continue
-            raw = {
-                'params': opt['params'],
-                **calc_stats(
-                    symbol,
-                    opt['weights'],
-                    scenarios[name],
-                ),
-            }
-            baskets[name] = Basket.model_validate(raw)
-        return baskets if baskets else None
-    return None
+
+    baskets: dict[str, Basket] = {}
+    for name, opt in opts.items():
+        if opt['weights'].is_empty():
+            continue
+        raw = {
+            'params': opt['params'],
+            **calc_stats(
+                symbol,
+                opt['weights'],
+                scenarios[name],
+            ),
+        }
+        baskets[name] = Basket.model_validate(raw)
+    return baskets if baskets else None
 
 
 def rebuild_from_weights(

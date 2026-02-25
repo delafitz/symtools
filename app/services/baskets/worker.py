@@ -15,6 +15,7 @@ import polars as pl
 from app.services.baskets.builder import (
     build_baskets,
 )
+from app.services.baskets.config import ModelChoice
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -22,19 +23,26 @@ log = get_logger(__name__)
 # Module-level worker state (set once per process)
 _w_refs: pl.DataFrame | None = None
 _w_hists: pl.DataFrame | None = None
-_w_fm = None
+_w_emp = None
+_w_barra = None
+_w_model_choice: ModelChoice = 'emp'
 
 
 def _init_worker(
     refs_path: str,
     hists_path: str,
-    fm_bytes: bytes | None,
+    emp_bytes: bytes | None,
+    barra_bytes: bytes | None,
+    model_choice: ModelChoice,
 ) -> None:
     """Runs once per worker process."""
-    global _w_refs, _w_hists, _w_fm
+    global _w_refs, _w_hists, _w_emp
+    global _w_barra, _w_model_choice
     _w_refs = pl.read_ipc(refs_path, memory_map=True)
     _w_hists = pl.read_ipc(hists_path, memory_map=True)
-    _w_fm = pickle.loads(fm_bytes) if fm_bytes else None
+    _w_emp = pickle.loads(emp_bytes) if emp_bytes else None
+    _w_barra = pickle.loads(barra_bytes) if barra_bytes else None
+    _w_model_choice = model_choice
 
 
 def _build_one(
@@ -50,7 +58,9 @@ def _build_one(
             hist,
             _w_refs,
             _w_hists,
-            factor_model=_w_fm,
+            emp_model=_w_emp,
+            barra_model=_w_barra,
+            model_choice=_w_model_choice,
         )
         return symbol, baskets, perf_counter() - start
     except Exception:
@@ -64,7 +74,9 @@ def run_batch(
     symbols_hists: list[tuple[str, pl.DataFrame]],
     refs: pl.DataFrame,
     hists: pl.DataFrame,
-    factor_model,
+    emp_model=None,
+    barra_model=None,
+    model_choice: ModelChoice = 'emp',
 ) -> dict[str, tuple[dict, float]]:
     """Write shared data to temp IPC, run pool.
 
@@ -77,8 +89,9 @@ def run_batch(
     try:
         refs.write_ipc(refs_path)
         hists.write_ipc(hists_path)
-        fm_bytes = (
-            pickle.dumps(factor_model) if factor_model else None
+        emp_bytes = pickle.dumps(emp_model) if emp_model else None
+        barra_bytes = (
+            pickle.dumps(barra_model) if barra_model else None
         )
 
         items = []
@@ -93,7 +106,9 @@ def run_batch(
             initargs=(
                 refs_path,
                 hists_path,
-                fm_bytes,
+                emp_bytes,
+                barra_bytes,
+                model_choice,
             ),
         ) as pool:
             futures = {

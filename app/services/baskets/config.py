@@ -7,6 +7,11 @@ construction. Parameters fall into two categories:
 2. Solver settings — control optimization behavior and performance
 """
 
+from typing import Literal
+
+ModelChoice = Literal['emp', 'barra']
+MODEL_CHOICE: ModelChoice = 'emp'
+
 # =============================================================================
 # BASKET CONSTRAINTS
 # =============================================================================
@@ -30,6 +35,16 @@ CARDINALITY: int = 4
 # Small positive value encourages sparser solutions.
 # Too high distorts optimal weights; too low has no effect.
 L1_COEF: float = 1e-5
+
+# =============================================================================
+# SECTOR NEUTRALITY
+# =============================================================================
+# Floor: minimum fraction of budget in target's sector.
+# Cap: maximum fraction of budget per off-sector.
+# Only applied in stage 2 (SCIP) for scenarios with stocks.
+
+SECTOR_FLOOR_PCT: float = 0.30
+SECTOR_CAP_PCT: float = 0.50
 
 # =============================================================================
 # SOLVER SETTINGS
@@ -57,4 +72,4 @@ STAGE2_MIN_COLS: int = 12
 
 # Number of top candidates to keep from stage 1 (CLARABEL).
 # These are passed to stage 2 (SCIP) for cardinality-constrained solve.
-STAGE1_TOPN: int = 10
+STAGE1_TOPN: int = 50

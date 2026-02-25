@@ -31,16 +31,16 @@ class Factor:
 
 
 @dataclass
-class FactorModel:
+class EmpModel:
     smb: Factor
     turnover: Factor
     n_stocks: int
 
 
-def build_factor_model(
+def build_emp_model(
     refs: pl.DataFrame,
     hists: pl.DataFrame,
-) -> FactorModel | None:
+) -> EmpModel | None:
     stocks = refs.filter(
         (pl.col('type') == 'stock') & (pl.col('mkt_cap') > 0)
     ).select('symbol', 'mkt_cap')
@@ -174,7 +174,7 @@ def build_factor_model(
         exclude=smb_factor.pc_index,
     )
 
-    model = FactorModel(
+    model = EmpModel(
         smb=smb_factor,
         turnover=turnover_factor,
         n_stocks=len(syms),
@@ -233,7 +233,7 @@ def _match_pc(
 
 
 def _log_factor_summary(
-    model: FactorModel,
+    model: EmpModel,
     cap_map: dict[str, float],
     adv_map: dict[str, float],
 ) -> None:
