@@ -48,7 +48,7 @@ Symtools is a FastAPI-based financial analytics server providing portfolio optim
 ### Core Data Flow
 
 1. **Startup** - Async loading with concurrency pool (see Startup Architecture below)
-2. **Symbol snapshot** (`/snapshot`) - SSE stream via `stream_symbol()`. Fires quote, PriceService, and analytics in parallel; yields events as they resolve. See `docs/snapshot-sse.md`.
+2. **Symbol snapshot** (`/snapshot`) - SSE stream via `stream_symbol()`. Fires quote, PriceService, and analytics in parallel; yields cold Y/M hists (with synthetic today bar), then loops per-template: re-yields Y/M with real today bar, fetches stale W/D basket-sym hists, yields basket_hists. See `docs/snapshot-sse.md`.
 3. **Hedge optimization** - Uses scikit-folio MeanRisk optimizer with SCIP solver against four scenario sets:
    - `indices`: SPY, QQQ, IWM
    - `factors`: sector/factor ETFs (XLK, XLF, SOXX, etc.)
@@ -71,8 +71,10 @@ Runs 4 phases sequentially, each using the shared semaphore for concurrent API c
 |-------|-------------|------------|--------------|
 | 1. Details | Fetch ticker details, filter by mkt_cap >= $1B | `refs.parquet` | every 50 |
 | 2. Floats+SI | Fetch free float + short interest (concurrent per symbol) | (in refs) | every 50 |
-| 3. Hists | Prefetch Y template for top 1000 by mkt_cap | `hists_Y.parquet` | every 50 |
-| 4. Baskets | Load basket hists for all groups/templates | `{group}_{template}.parquet` | every 4 |
+| 3. Hists | Prefetch Y template for top 5000 by mkt_cap + ETFs | `hists.parquet` | every 50 |
+| 4. ETF Hists | Prefetch M/W/D templates for ETF symbols | (in hists) | every 20 |
+
+**Note:** Startup-loaded hists do not set `_hist_loaded_at` timestamps. The stream pre-fetch (step 6) treats unknown-age W/D data as stale (`hist_age()` returns `inf`), ensuring ETF intraday hists are refreshed on first snapshot request.
 
 **Startup Summary** (logged as Polars table in yellow):
 ```
@@ -202,7 +204,11 @@ Owns daily (Y) hist data, template routing, and SymbolHist response building. St
 
 **`end_price_from_quote(quote)`** — module-level function, returns `quote.close`. This is the single source of truth for `end_price`. Callers (stream.py, router.py) fetch the quote first, extract `end_price`, and pass it to `build_response()`.
 
-**Intraday refresh**: W/D hists are re-fetched by `cache.get_hist_async` when age > `INTRADAY_TTL` (120s). This is transparent — callers get fresh data without any code change. The stream pre-fetch (step 6) also refreshes stale basket-constituent W/D hists.
+**Intraday refresh**: W/D hists are re-fetched by `cache.get_hist_async` when age > `INTRADAY_TTL` (120s). This is transparent — callers get fresh data without any code change. Y/M daily data is T-1; today's partial bar is fetched separately via `cache.fetch_today_bars_async()` (single-day API call) and appended to Y/M in cache.hists.
+
+**Today-bar helpers** on `PriceService`:
+- `append_quote_bar(end_price)` — appends synthetic today bar (OHLC=close, vol=0) for immediate cold yield
+- `replace_today_bar(bar)` — replaces synthetic bar with real API data (real OHL, volume)
 
 **Price helpers** (module-level, operate on a `daily: pl.DataFrame` argument):
 - `_close(daily, date_str)` — daily close for a date
@@ -243,7 +249,7 @@ Owns daily (Y) hist data, template routing, and SymbolHist response building. St
 - Pre-market: `quote.close` = prev close → `end_date` = prev trading day. Stats show T-1 returns.
 - Market hours: `quote.close` = running close → `end_date` = today. Stats show live intraday return.
 - Post-market: `quote.close` = official close → `end_date` = today. Stats show finalized daily return.
-- Daily templates (Y/M): bars end at T-1, `end_price` from quote is today's price. Stats show live return through today even though bars stop yesterday.
+- Daily templates (Y/M): bars are T-1 data from cache. During market hours, a today-bar is appended (first synthetic from quote close, then real from single-day API fetch). `end_price` from quote is always the source of truth for stats.
 
 **Market Sessions** (`app/utils/market.py`):
 | Session | Window (ET) |
@@ -309,10 +315,11 @@ Rule-based signals evaluated from symbol data. Decorator-based registry: `@rule(
 - Unified hists: `self.hists` — single Polars DataFrame with `symbol`/`template` columns, all templates concatenated
 - `get_hist(symbol, template)` — sync, filters unified hists, drops metadata columns
 - `get_hist_async(symbol, template)` — async, fetches from API if not cached or stale, adds to unified hists
-- Intraday TTL: W/D hists tracked via `_hist_loaded_at` timestamps; re-fetched when age > `INTRADAY_TTL` (120s). Double-checked inside the per-symbol lock to avoid redundant concurrent fetches. Empty API responses preserve old cached data.
+- Intraday TTL: W/D hists tracked via `_hist_loaded_at` timestamps; re-fetched when age > `INTRADAY_TTL` (120s). `hist_age()` returns `float('inf')` for unknown load times (e.g. data loaded at startup without timestamps), so startup-loaded ETF intraday hists are always refreshed on first use. Double-checked inside the per-symbol lock to avoid redundant concurrent fetches. Empty API responses preserve old cached data.
+- Today bar: `fetch_today_bars_async(symbols)` fetches a single-day daily bar for each symbol and appends to Y/M data in hists. Used by stream to get real OHL for today without re-fetching full Y/M series.
 - Parquet: `data/hists.YYYYMMDD.parquet` — persisted on startup, loaded on cached startup
 - Baskets: `data/baskets.YYYYMMDD.parquet` — cached optimizer weights, rebuilt on load
-- During snapshot stream, M/W/D hists for basket constituent symbols (singles) are fetched on-demand if not already cached or stale
+- During snapshot stream, today's daily bar is fetched for target + basket constituent symbols (single-day call), and W/D intraday hists are fetched on-demand if not cached or stale
 
 ## Code Style
 

@@ -13,6 +13,7 @@ from app.utils.market import (
     DT_FMT,
     ET,
     MARKET_OPEN,
+    last_trading_day,
     last_weekday,
     prev_weekday,
     slice_hist,
@@ -158,6 +159,55 @@ class PriceService:
     @property
     def daily(self) -> pl.DataFrame:
         return self._daily
+
+    # --- today-bar helpers ---
+
+    def append_quote_bar(self, end_price: float) -> None:
+        """Append synthetic today bar (OHLC=close, vol=0)."""
+        today = last_trading_day().strftime(DT_FMT)
+        last_date = self._daily.select('date').tail(1).item()
+        if today <= last_date:
+            return
+        prev_close = self._daily.select('close').tail(1).item()
+        pct_ret = (
+            round(end_price / prev_close - 1, 4)
+            if prev_close and prev_close > 0
+            else None
+        )
+        row = pl.DataFrame(
+            [
+                {
+                    'date': today,
+                    'iso': '',
+                    'timestamp': 0,
+                    'open': end_price,
+                    'high': end_price,
+                    'low': end_price,
+                    'close': end_price,
+                    'vwap': 0.0,
+                    'volume': 0.0,
+                    'pct_return': pct_ret,
+                }
+            ],
+            schema=self._daily.schema,
+        )
+        self._daily = pl.concat([self._daily, row])
+
+    def replace_today_bar(self, bar: pl.DataFrame) -> None:
+        """Replace synthetic today bar with real data."""
+        today = last_trading_day().strftime(DT_FMT)
+        prev = self._daily.filter(pl.col('date') < today)
+        if prev.is_empty():
+            return
+        prev_close = prev.select('close').tail(1).item()
+        close = bar.select('close').item()
+        pct_ret = (
+            round(close / prev_close - 1, 4)
+            if prev_close and prev_close > 0
+            else None
+        )
+        bar = bar.with_columns(pl.lit(pct_ret).alias('pct_return'))
+        self._daily = pl.concat([prev, bar])
 
     # --- hist routing ---
 

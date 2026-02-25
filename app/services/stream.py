@@ -28,11 +28,9 @@ async def stream_symbol(
 ) -> AsyncGenerator[tuple[str, BaseModel], None]:
     """Stream symbol data via SSE.
 
-    Fires parallel tasks on entry, yields results
-    as they complete:
-    - quote, analytics, hist (Y, M, W, D)
-    - baskets — depends on Y hist
-    - basket_hist — depends on baskets + template hist
+    Fires parallel tasks on entry, yields cold Y/M
+    hists with a synthetic today bar, then loops
+    per-template to yield real hists + basket_hists.
     """
     if not cache.get_ref(symbol):
         return
@@ -49,19 +47,22 @@ async def stream_symbol(
     yield ('quote', quote)
     end_price = end_price_from_quote(quote)
 
-    # 2. Prices + Y hist
+    # 2. PriceService + cold Y/M with synthetic today bar
     prices = await prices_task
     if prices is None:
         return
+    prices.append_quote_bar(end_price)
+
     y_resp = await prices.build_response(symbol, 'Y', end_price)
     if y_resp is None:
         return
-    log.yellow(
-        f'{symbol} hist {y_resp.template} '
-        f'aggs={len(y_resp.daily_aggs) if y_resp.daily_aggs else 0} '
-        f'bars={len(y_resp.bars)}'
-    )
+    log.yellow(f'{symbol} hist Y (cold) bars={len(y_resp.bars)}')
     yield ('hist', y_resp)
+
+    m_resp = await prices.build_response(symbol, 'M', end_price)
+    if m_resp:
+        log.yellow(f'{symbol} hist M (cold) bars={len(m_resp.bars)}')
+        yield ('hist', m_resp)
 
     # 3. Analytics
     analytics = await analytics_task
@@ -76,83 +77,58 @@ async def stream_symbol(
     if baskets:
         yield ('baskets', baskets)
 
-    # 5. Y basket_hist
-    log.yellow(
-        f'{symbol} basket_hist: '
-        f'baskets={bool(baskets)} '
-        f'hists={cache.hists is not None} '
-        f'basket_svc={cache.basket_svc is not None}'
-    )
-    if baskets and cache.hists is not None:
-        y_hist = await prices.hist(symbol, 'Y')
-        if y_hist is not None:
-            _, _, _, _, y_max = HIST_TEMPLATES['Y']
-            y_prev = (
-                y_resp.stats[y_max].prev_date
-                if y_max in y_resp.stats
-                else None
-            )
-            y_tracking = compute_tracking_for_template(
-                symbol,
-                y_hist,
-                'Y',
-                y_max,
-                baskets,
-                cache.hists,
-                prev_date=y_prev,
-            )
-            if y_tracking:
-                for bh in build_basket_hists(
-                    symbol,
-                    'Y',
-                    y_tracking,
-                    y_resp.stats,
-                    baskets,
-                    cache.hists,
-                ):
-                    log.yellow(
-                        f'{symbol} basket_hist '
-                        f'{bh.template} '
-                        f'{bh.basket} '
-                        f'bars={len(bh.weighted)}'
-                    )
-                    yield ('basket_hist', bh)
-            else:
-                log.yellow(f'{symbol} Y tracking: None')
-
-    # 6. Pre-fetch missing basket-symbol hists
-    if baskets and cache.hists is not None:
-        basket_syms: set[str] = set()
+    # Collect basket syms once
+    basket_syms: set[str] = set()
+    if baskets:
         for sc in baskets.baskets.values():
             basket_syms.update(sc.weights.keys())
-        fetch_tasks = [
-            cache.get_hist_async(sym, t)
-            for sym in basket_syms
-            for t in ['M', 'W', 'D']
-            if cache.get_hist(sym, t) is None
-            or (
-                t in ('W', 'D')
-                and (cache.hist_age(sym, t) or 0) > INTRADAY_TTL
+
+    # 5. Fetch real today bars for target + basket syms
+    today_bars = await cache.fetch_today_bars_async(
+        {symbol} | basket_syms
+    )
+    if symbol in today_bars:
+        prices.replace_today_bar(today_bars[symbol])
+
+    # 6. Per-template: hist → basket_hists
+    for template in HIST_TEMPLATES:
+        if template in ('Y', 'M'):
+            # Re-yield with real today bar
+            resp = await prices.build_response(
+                symbol, template, end_price
             )
-        ]
-        if fetch_tasks:
-            await asyncio.gather(*fetch_tasks)
+            if resp is None:
+                continue
+            log.yellow(
+                f'{symbol} hist {resp.template} bars={len(resp.bars)}'
+            )
+            yield ('hist', resp)
+        else:
+            # W/D: fetch stale basket-sym hists
+            if basket_syms and cache.hists is not None:
+                fetch_tasks = [
+                    cache.get_hist_async(sym, template)
+                    for sym in basket_syms
+                    if cache.get_hist(sym, template) is None
+                    or cache.hist_age(sym, template) > INTRADAY_TTL
+                ]
+                if fetch_tasks:
+                    await asyncio.gather(*fetch_tasks)
 
-    # 7. M / W / D hists + basket_hists
-    for template in ['M', 'W', 'D']:
-        resp = await prices.build_response(
-            symbol, template, end_price
-        )
-        if resp is None:
-            continue
-        log.yellow(
-            f'{symbol} hist {resp.template} '
-            f'aggs='
-            f'{len(resp.daily_aggs) if resp.daily_aggs else 0} '
-            f'bars={len(resp.bars)}'
-        )
-        yield ('hist', resp)
+            resp = await prices.build_response(
+                symbol, template, end_price
+            )
+            if resp is None:
+                continue
+            log.yellow(
+                f'{symbol} hist {resp.template} '
+                f'aggs='
+                f'{len(resp.daily_aggs) if resp.daily_aggs else 0} '
+                f'bars={len(resp.bars)}'
+            )
+            yield ('hist', resp)
 
+        # Basket_hists
         if baskets and cache.hists is not None:
             hist = await prices.hist(symbol, template)
             if hist is None:
@@ -194,7 +170,7 @@ async def stream_symbol(
             else:
                 log.yellow(f'{symbol} {template} tracking: None')
 
-    # 8. Alerts
+    # 7. Alerts
     from app.services.alerts import AlertContext, evaluate
 
     ctx = AlertContext(

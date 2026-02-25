@@ -5,6 +5,7 @@ from time import monotonic
 import polars as pl
 
 from app.mds.client import get_provider
+from app.utils.market import DT_FMT, last_trading_day
 from app.models.analytics import SymbolAnalytics
 from app.services.quotes import QuoteService
 from app.models.baskets import SymbolBaskets
@@ -264,10 +265,10 @@ class Cache:
 
         return hist if not hist.is_empty() else None
 
-    def hist_age(self, symbol: str, template: str) -> float | None:
+    def hist_age(self, symbol: str, template: str) -> float:
         loaded = self._hist_loaded_at.get((symbol, template))
         if loaded is None:
-            return None
+            return float('inf')
         return monotonic() - loaded
 
     async def get_hist_async(
@@ -278,7 +279,7 @@ class Cache:
         stale = (
             hist is not None
             and template in ('W', 'D')
-            and (self.hist_age(symbol, template) or 0) > INTRADAY_TTL
+            and self.hist_age(symbol, template) > INTRADAY_TTL
         )
         if hist is not None and not stale:
             return hist
@@ -291,8 +292,7 @@ class Cache:
             hist = self.get_hist(symbol, template)
             age = self.hist_age(symbol, template)
             if hist is not None and (
-                template not in ('W', 'D')
-                or (age is not None and age <= INTRADAY_TTL)
+                template not in ('W', 'D') or age <= INTRADAY_TTL
             ):
                 return hist
 
@@ -321,6 +321,80 @@ class Cache:
 
             # API returned empty — keep old data
             return hist
+
+    async def fetch_today_bars_async(
+        self, symbols: set[str]
+    ) -> dict[str, pl.DataFrame]:
+        """Fetch today's daily bar for symbols.
+
+        Appends to Y and M data in cache.hists.
+        Returns symbol → today-bar DataFrame.
+        """
+        today = last_trading_day().strftime(DT_FMT)
+
+        need: set[str] = set()
+        for sym in symbols:
+            hist = self.get_hist(sym, 'Y')
+            if hist is None:
+                continue
+            last = hist.select('date').tail(1).item()
+            if last < today:
+                need.add(sym)
+
+        if not need:
+            return {}
+
+        async def _fetch(
+            sym: str,
+        ) -> tuple[str, pl.DataFrame]:
+            bar = await asyncio.to_thread(
+                self.mds.get_hist,
+                sym,
+                'day',
+                1,
+                'days',
+                0,
+                quiet=True,
+            )
+            return sym, bar
+
+        results = await asyncio.gather(*[_fetch(s) for s in need])
+
+        bars: dict[str, pl.DataFrame] = {}
+        for sym, bar in results:
+            if bar.is_empty():
+                continue
+            today_bar = bar.filter(pl.col('date') == today)
+            if today_bar.is_empty():
+                continue
+            bars[sym] = today_bar
+            for tmpl in ('Y', 'M'):
+                if self.get_hist(sym, tmpl) is not None:
+                    self._append_hist_bar(sym, tmpl, today_bar)
+        return bars
+
+    def _append_hist_bar(
+        self,
+        symbol: str,
+        template: str,
+        bar: pl.DataFrame,
+    ) -> None:
+        """Append/replace a bar in hists."""
+        if self.hists is None:
+            return
+        bar_date = bar.select('date').head(1).item()
+        self.hists = self.hists.filter(
+            ~(
+                (pl.col('symbol') == symbol)
+                & (pl.col('template') == template)
+                & (pl.col('date') == bar_date)
+            )
+        )
+        bar_with_meta = bar.with_columns(
+            pl.lit(symbol).alias('symbol'),
+            pl.lit(template).alias('template'),
+        )
+        self.hists = pl.concat([self.hists, bar_with_meta])
 
     async def _load_symbol_series_background(
         self, symbol: str

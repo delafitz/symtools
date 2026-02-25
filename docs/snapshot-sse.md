@@ -8,24 +8,45 @@ Streams symbol data as server-sent events. Each event has a `type` and JSON `dat
 
 ```
 1. quote
-2. hist (Y)
+2. hist (Y) ← cold, synthetic today bar
+   hist (M) ← cold, synthetic today bar
 3. analytics
 4. baskets
-5. basket_hist (Y × scenarios)
-6. [fetch missing basket symbol hists for M/W/D]
-7. hist (M) → basket_hist (M × scenarios)
+5. [fetch real today bars — single-day API call for target + basket syms]
+6. hist (Y) ← re-yield with real today bar
+   basket_hist (Y × scenarios)
+   hist (M) ← re-yield with real today bar
+   basket_hist (M × scenarios)
+   [fetch stale W/D basket-sym hists]
    hist (W) → basket_hist (W × scenarios)
    hist (D) → basket_hist (D × scenarios)
-8. alerts (if any rules trigger)
-9. done
+7. alerts (if any rules trigger)
+8. done
 ```
+
+### Design rationale
+
+**Two-phase Y/M yield.** Y/M daily hists are T-1 data cached from startup (bars end yesterday). During market hours, Polygon returns an in-progress daily bar for today with real OHL and volume. Rather than re-fetch the entire 2-year Y series to get one bar, the stream:
+
+1. **Cold yield (step 2):** Appends a synthetic today bar to PriceService's daily data (OHLC = quote close, volume = 0) and yields Y/M immediately. The client gets a chart with today's bar anchored to the correct close price. Stats are correct because `endPrice` comes from the quote, not the bar's close.
+
+2. **Real yield (step 6):** Fetches today's single daily bar for the target symbol and all basket constituent symbols via `cache.fetch_today_bars_async()` — one `/v2/aggs/.../1/day/{today}/{today}` call per symbol, run in parallel. Replaces the synthetic bar with real OHL data, appends to Y/M in `cache.hists` for basket syms, then re-yields Y/M.
+
+The client receives two `hist` events per daily template. The second replaces the first (same `symbol` + `template` key). This is intentional — the cold yield gives sub-second chart render; the re-yield adds real OHL and volume once available.
+
+**W/D unchanged.** Intraday hists (W/D) are fetched fresh via `cache.get_hist_async` with a 120s TTL (`INTRADAY_TTL`). No synthetic bar needed — intraday bars are always live.
+
+**Staleness model.** `cache.get_hist_async` only applies TTL staleness to W/D templates. Y/M are never re-fetched via staleness — they're immutable T-1 data. Today's bar is the only live component, handled by the dedicated today-bar fetch.
+
+### Notes
 
 - Quote, `PriceService.create`, and analytics fire in parallel on entry
 - `PriceService` owns all hist routing: Y from stored daily, M sliced from Y (no extra API call), W/D fetched via cache
-- If daily data is stale (missing today's bar or older than 5 min TTL), PriceService refreshes before building responses
-- `hist` events fire as templates resolve (Y first, then M, W, D); bars always sent at max scale, client slices via stats
+- `PriceService.append_quote_bar(end_price)` appends the synthetic today bar; `replace_today_bar(bar)` swaps in the real one — both operate on `_daily`, which M slices from
+- `hist` events fire as templates resolve; bars always sent at max scale, client slices via stats
 - `baskets` depends on Y hist; `basket_hist` depends on baskets + that template's hist
-- Step 6 pre-fetches M/W/D hists for basket constituent symbols not already cached (e.g. singles stocks only have Y from startup)
+- Step 5 today-bar fetch also appends to Y and M entries in `cache.hists` for basket constituent symbols, so tracking sees today's data
+- Step 6 fetches stale W/D intraday hists for basket constituent symbols not already cached
 - `basket_hist` emits one event per scenario per template
 - `analytics` and `baskets` may be absent if data is unavailable
 - Stream terminates with `done` (or `error` + `done` on failure)
@@ -44,10 +65,10 @@ All times Eastern (ET). Session is derived from the Polygon quote timestamp via 
 **How sessions affect data:**
 
 - **Quote**: `session`, `sessionLast`, `sessionChg` fields present outside `market` hours; absent during regular hours
-- **Hist dates**: Intraday templates (W, D) set `endDate` = today if market has opened (>= 9:30 AM), else prior trading day. Daily templates (Y, M) use actual bar dates.
-- **Daily refresh**: `PriceService` refreshes Y daily data when market is open and data is >5 min old (300s TTL)
-- **Intraday refresh**: Cache re-fetches W/D hists when >2 min old (120s TTL via `INTRADAY_TTL` in `cache.py`). Transparent to the client — same response shape, fresher bars.
-- **Pre-market**: Bars may accumulate from 4:00 AM but stats anchor to finalized daily closes; `endDate` won't advance to today until 9:30 AM
+- **Hist dates**: Intraday templates (W, D) set `endDate` = today if market has opened (>= 9:30 AM), else prior trading day. Daily templates (Y, M) use last bar date — which is today during market hours (from today-bar fetch) or T-1 (pre-market / closed).
+- **Today bar**: During market hours, Polygon returns an in-progress daily bar for today. The stream fetches it via a single-day API call and appends to Y/M data. Before the real fetch completes, a synthetic bar (OHLC = quote close, vol = 0) provides immediate chart data.
+- **Intraday refresh**: Cache re-fetches W/D hists when >2 min old (120s TTL via `INTRADAY_TTL` in `cache.py`). Transparent to the client — same response shape, fresher bars. Y/M are not subject to TTL — they are immutable T-1 data; only today's bar is live.
+- **Pre-market**: `last_trading_day()` returns the prior trading day before 4:30 AM, so no synthetic today bar is appended and Y/M yield T-1 data only. After 4:30 AM, today's bar may appear but stats anchor to the quote's close (which equals prev close in pre-market).
 
 **Reference price for session change:**
 
@@ -149,7 +170,7 @@ OHLCV bars for one template with per-scale stats.
 | `multiplier` | Bar size (1 for daily, 10 or 30 for intraday) |
 | `scale` | Requested scale (default for template) |
 | `stats[n].endDate` | Last trading day in range |
-| `stats[n].endPrice` | Daily close on end date (from Y hist, or market close bar as fallback) |
+| `stats[n].endPrice` | Quote close (single source of truth for live price, not derived from bar data) |
 | `stats[n].startDate` | First trading day in range (inclusive) |
 | `stats[n].prevDate` | Trading day before start (return baseline) |
 | `stats[n].prevClose` | Daily close on prev date |
@@ -166,11 +187,11 @@ For intraday templates (W, D), dates are clock-driven:
 - `prevDate` = trading day before `startDate`
 
 For daily templates (Y, M), dates come from the actual bar data:
-- `endDate` = last bar date
+- `endDate` = last bar date (today during market hours after today-bar fetch, T-1 otherwise)
 - `startDate` = first bar date for that scale
 - `prevDate` = trading day before `startDate` (from daily data)
 
-Note: bar data may include pre-session bars for the current day even when `endDate` is the prior trading day. The stats reflect finalized daily closes; bars reflect real-time availability.
+Note: `endPrice` always comes from the quote (not the bar's close), so stats are accurate even when the last bar is a synthetic placeholder. The cold yield's synthetic bar has OHLC = quote close and vol = 0; the re-yield replaces it with Polygon's real in-progress bar (true OHL, accumulating volume). For intraday templates, bar data may include pre-session bars beyond `endDate`.
 
 **Templates:**
 
