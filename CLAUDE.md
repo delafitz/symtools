@@ -172,6 +172,18 @@ All routes defined in `app/server/router.py`:
 - `cardinality`: int = 4 (max non-zero weights)
 - `l1_coef`: float = 1e-5 (L1 regularization)
 
+#### Model Strategy (`app/services/baskets/config.py`)
+
+Two factor models for candidate screening and covariance estimation, toggled by `ModelChoice` (`'emp'` | `'barra'`) in `config.py`. `BasketService` reads `MODEL_CHOICE` at init and only builds the selected model. See `docs/MODELS.md` for full details.
+
+**Empirical** (`'emp'`, default) — PCA-based (`EmpModel` in `factors.py`). Two factors (SMB + turnover) from principal components. Candidate screen: L1 distance on factor loadings, refined by correlation. Optimizer uses skfolio `EmpiricalPrior` (default).
+
+**Barra** (`'barra'`) — Structured multi-factor (`BarraModel` in `barra.py`). 7 style factors + sector factors from Q5-Q1 factor-mimicking portfolios. Candidate screen: L1 distance on 6 z-scored style exposures with same-sector bonus. Optimizer uses skfolio `FactorModel` prior (B'FB + D covariance) with sector floor/cap constraints.
+
+**Pipeline**: `BasketService` → `build_baskets(model_choice)` → `get_scenarios(emp_model=... | barra_model=...)` → `run_opts(...)` with model-specific prior/constraints → `calc_stats()`.
+
+**Comparison tool**: `tools/barra.py` runs both models side-by-side (`uv run python tools/barra.py AAPL`).
+
 ### QuoteService (`app/services/quotes.py`)
 
 Owns all quote fetching with TTL-based caching. Quotes are the single source of truth for `end_price` across the entire snapshot and hist pipeline.
