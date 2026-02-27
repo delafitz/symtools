@@ -111,6 +111,7 @@ async def load_refs_async(
                         'days_to_cover': 0.0,
                         'short_avg_vol': 0,
                         'short_interest_date': '',
+                        'g_sector': details.get('g_sector', ''),
                         'type': TYPE_STOCK,
                     }
             except asyncio.TimeoutError:
@@ -164,6 +165,7 @@ async def load_refs_async(
                 'days_to_cover': 0.0,
                 'short_avg_vol': 0,
                 'short_interest_date': '',
+                'g_sector': '',
                 'type': get_symbol_type(etf_sym),
             }
         )

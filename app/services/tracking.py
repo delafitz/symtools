@@ -27,8 +27,10 @@ def _get_symbol_closes(
     hists: pl.DataFrame,
 ) -> pl.DataFrame | None:
     """Get closes for a symbol from unified hists."""
+    # M is a subset of Y daily data — use Y if M not cached
+    lookup = 'Y' if template == 'M' else template
     filtered = hists.filter(
-        (pl.col('symbol') == sym) & (pl.col('template') == template)
+        (pl.col('symbol') == sym) & (pl.col('template') == lookup)
     )
     if filtered.is_empty():
         return None

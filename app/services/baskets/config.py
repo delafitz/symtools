@@ -10,7 +10,7 @@ construction. Parameters fall into two categories:
 from typing import Literal
 
 ModelChoice = Literal['emp', 'barra']
-MODEL_CHOICE: ModelChoice = 'emp'
+MODEL_CHOICE: ModelChoice = 'barra'
 
 # =============================================================================
 # BASKET CONSTRAINTS

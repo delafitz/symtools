@@ -2,6 +2,7 @@ import polars as pl
 
 from app.utils.corp import strip_name
 from app.utils.logger import get_logger
+from app.utils.sic_gics import sic_to_sector
 
 log = get_logger(__name__)
 
@@ -33,6 +34,7 @@ REF_SCHEMA = {
     'days_to_cover': pl.Float64,
     'short_avg_vol': pl.Int64,
     'short_interest_date': pl.String,
+    'g_sector': pl.String,
 }
 
 
@@ -72,5 +74,6 @@ def fetch_ticker_details(client, symbol: str):
             'sic': details.sic_description or '',
             'shares_out': details.share_class_shares_outstanding or 0,
             'mkt_cap': details.market_cap,
+            'g_sector': sic_to_sector(details.sic_description or ''),
         }
     return None

@@ -182,6 +182,14 @@ Two factor models for candidate screening and covariance estimation, toggled by 
 
 **Pipeline**: `BasketService` → `build_baskets(model_choice)` → `get_scenarios(emp_model=... | barra_model=...)` → `run_opts(...)` with model-specific prior/constraints → `calc_stats()`.
 
+**Basket stats** (`calc_stats()` in `app/services/baskets/risk.py` → `Basket` model):
+- `weights`: hedge symbol → weight (from optimizer)
+- `beta`: target→basket beta over 200d (`cov / var`). Hedge ratio — for every $1 of stock, short $β of basket.
+- `corrs`: target↔basket correlation at 200d and 30d windows. Quality of linear fit + stability.
+- `vols`: annualized vol (90d) for target, basket, and hedged (residual), plus `reduction` (1 − hedged/target). Hedged vol is beta-adjusted (`target − β × basket`), so reduction reflects the risk removed by a properly sized hedge.
+
+`calc_stats()` returns a dict; `Basket.model_validate()` wraps it in `builder.py`. `series` (cumulative basket returns) is consumed by tracking, not serialized in the model.
+
 **Comparison tool**: `tools/barra.py` runs both models side-by-side (`uv run python tools/barra.py AAPL`).
 
 ### QuoteService (`app/services/quotes.py`)

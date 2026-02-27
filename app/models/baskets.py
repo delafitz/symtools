@@ -18,23 +18,20 @@ class BasketParams(BaseModel):
     l1_coef: float = L1_COEF
 
 
-class VolStats(BaseModel):
+class BasketStats(BaseModel):
     model_config = config()
-    target: float = f(Fmt.vol)
-    basket: float = f(Fmt.vol)
-    hedged: float = f(Fmt.vol)
-    reduction: float = f(Fmt.ratio)
+    weight: float = f(Fmt.ratio)
+    beta: float = f(Fmt.ratio)
+    corr: float = f(Fmt.ratio)
+    vol_reduce: float = f(Fmt.pct)
 
 
 class Basket(BaseModel):
     model_config = config()
     params: BasketParams = fp('Params')
     weights: dict[str, float] = fp('Weights', Fmt.ratio)
-    returns: dict[str, TermStruct] = fp(
-        'Hedged', Fmt.pct, 'Outright', Fmt.meta
-    )
+    stats: BasketStats = fp('Stats')
     corrs: dict[str, TermStruct] = fp('Corrs', Fmt.ratio)
-    vols: VolStats = fp('Vols')
 
 
 class SymbolBaskets(BaseModel):

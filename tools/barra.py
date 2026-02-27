@@ -251,31 +251,28 @@ def run_comparison(
                 symbol,
                 emp['weights'],
                 emp_sc,
-            )
+            )['stats']
             bar_stats = calc_stats(
                 symbol,
                 bar['weights'],
                 bar_sc,
-            )
+            )['stats']
 
-            ev = emp_stats['vols']
-            bv = bar_stats['vols']
             print(
-                f'  {"vol_reduction":>20s} '
-                f'{ev["reduction"]:>11.1%} '
-                f'{bv["reduction"]:>11.1%}'
+                f'  {"corr":>20s} '
+                f'{emp_stats["corr"]:>12.4f} '
+                f'{bar_stats["corr"]:>12.4f}'
             )
-
-            ec = emp_stats['corrs']
-            bc = bar_stats['corrs']
-            for window in ec:
-                ecv = ec[window]['value']
-                bcv = bc[window]['value']
-                print(
-                    f'  {window + "_corr":>20s} '
-                    f'{ecv:>12.4f} '
-                    f'{bcv:>12.4f}'
-                )
+            print(
+                f'  {"beta":>20s} '
+                f'{emp_stats["beta"]:>12.4f} '
+                f'{bar_stats["beta"]:>12.4f}'
+            )
+            print(
+                f'  {"vol_reduce":>20s} '
+                f'{emp_stats["vol_reduce"]:>11.1%} '
+                f'{bar_stats["vol_reduce"]:>11.1%}'
+            )
 
 
 def main() -> None:

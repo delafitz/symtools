@@ -99,9 +99,7 @@ def _fetch_sync(symbol: str) -> tuple[str, str] | None:
                 req, timeout=TIMEOUT_S
             ) as resp:
                 data = json.loads(resp.read())
-            result = (
-                data.get('quoteSummary', {}).get('result') or []
-            )
+            result = data.get('quoteSummary', {}).get('result') or []
             if not result:
                 return None
             profile = result[0].get('assetProfile') or {}
@@ -159,9 +157,7 @@ async def run(symbols: list[str], existing: dict[str, dict]) -> None:
     counter = [0]
     total = len(symbols)
 
-    tasks = [
-        _fetch(sem, sym, counter, total) for sym in symbols
-    ]
+    tasks = [_fetch(sem, sym, counter, total) for sym in symbols]
     results = await asyncio.gather(*tasks)
 
     rows: dict[str, dict] = dict(existing)
@@ -195,7 +191,7 @@ def main() -> None:
     if '--top' in args:
         idx = args.index('--top')
         top_n = int(args[idx + 1])
-        args = args[:idx] + args[idx + 2:]
+        args = args[:idx] + args[idx + 2 :]
 
     refs = load_refs()
     existing = {} if refresh else load_existing()
@@ -219,8 +215,7 @@ def main() -> None:
         return
 
     print(
-        f'fetching {len(symbols)} symbols '
-        f'({CONCURRENCY} workers)...'
+        f'fetching {len(symbols)} symbols ({CONCURRENCY} workers)...'
     )
     asyncio.run(run(symbols, existing))
 

@@ -6,7 +6,7 @@ TYPE_ETF_FACTOR = 'etf_factor'
 # ETF symbol lists (lowercase)
 INDEX_ETFS = 'spy,qqq,iwm'
 SECTOR_ETFS = (
-    'xlf,xlk,xlv,xlc,xle,xli,xly,xrt,xlu,xlp,kre,xbi,xme,xop,xhb'
+    'xlf,xlk,xlv,xlc,xle,xli,xly,xrt,xlu,xlp,kre,xbi,xme,xop,xhb,xlb'
 )
 ISHARES_ETFS = 'mtum,soxx,igv,iyr,itb,ibb'
 OTHER_ETFS = 'gld,uso,ibit'

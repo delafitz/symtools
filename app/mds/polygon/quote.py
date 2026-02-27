@@ -34,14 +34,16 @@ def fetch_quote(client: RESTClient, symbol: str) -> SymbolQuote:
     grab all session-specific fields without checking session type.
     """  # noqa: E501
     s = client.get_snapshot_ticker('stocks', symbol.upper())
-    close = s.day.close if s.day.close > 0 else s.prev_day.close
+    close = float(
+        s.day.close if s.day.close > 0 else s.prev_day.close
+    )
     # Best last price: last_trade > min bar > prev close
     if s.last_trade and s.last_trade.price > 0:
-        last = s.last_trade.price
+        last = float(s.last_trade.price)
     elif s.min and s.min.close > 0:
-        last = s.min.close
+        last = float(s.min.close)
     else:
-        last = s.prev_day.close
+        last = float(s.prev_day.close)
 
     # Volume: day if available, else prev day
     if s.day.volume > 0:
@@ -49,15 +51,19 @@ def fetch_quote(client: RESTClient, symbol: str) -> SymbolQuote:
     else:
         volume = float(s.prev_day.volume)
 
+    prev = float(s.prev_day.close)
+    chg = close - prev
+    pct_chg = (chg / prev * 100) if prev else 0.0
+
     quote: dict = {
         'symbol': symbol,
         'updated': ns_to_dt(s.updated).isoformat(),
-        'prev': s.prev_day.close,
+        'prev': prev,
         'close': close,
         'last': last,
         'volume': volume,
-        'chg': s.todays_change,
-        'pct_chg': s.todays_change_percent,
+        'chg': chg,
+        'pct_chg': pct_chg,
     }
 
     session = get_session(s.updated // 1_000_000)
@@ -102,8 +108,8 @@ def fetch_quote(client: RESTClient, symbol: str) -> SymbolQuote:
                 float(s.day.close),
                 None,
                 float(s.day.volume),
-                float(s.todays_change),
-                float(s.todays_change_percent),
+                chg,
+                pct_chg,
                 None,
                 None,
                 None,

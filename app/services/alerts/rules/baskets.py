@@ -14,12 +14,10 @@ def poor_index_hedge(ctx: AlertContext) -> Alert | None:
     indices = ctx.baskets.baskets.get('indices')
     if not indices:
         return None
-    corr_200 = indices.corrs.get('200d')
-    if not corr_200:
+    corr = indices.stats.corr
+    if corr >= 0.2:
         return None
-    if corr_200.value >= 0.2:
-        return None
-    score = _scale(corr_200.value, 0.2, above=False)
+    score = _scale(corr, 0.2, above=False)
     return Alert(
         rule='poor_index_hedge',
         category='baskets',
@@ -27,7 +25,7 @@ def poor_index_hedge(ctx: AlertContext) -> Alert | None:
         score=score,
         label='LowIndex',
         desc='Index 200d corr < 0.2',
-        value=corr_200.value,
+        value=corr,
         value_format='ratio',
         threshold=0.2,
         threshold_format='ratio',
@@ -40,12 +38,11 @@ def no_good_hedges(ctx: AlertContext) -> Alert | None:
         return None
     best_corr: float | None = None
     for basket in ctx.baskets.baskets.values():
-        corr_200 = basket.corrs.get('200d')
-        if corr_200 and corr_200.value > 0.5:
+        corr = basket.stats.corr
+        if corr > 0.5:
             return None
-        if corr_200:
-            if best_corr is None or corr_200.value > best_corr:
-                best_corr = corr_200.value
+        if best_corr is None or corr > best_corr:
+            best_corr = corr
     score = (
         _scale(best_corr, 0.5, above=False)
         if best_corr is not None

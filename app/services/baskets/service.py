@@ -113,8 +113,7 @@ class BasketService:
                         'scenario': name,
                         'weights': '',
                         'corr': None,
-                        'tgt_vol': None,
-                        'hdg_vol': None,
+                        'beta': None,
                         'vol_red': None,
                         'secs': secs,
                     }
@@ -128,18 +127,14 @@ class BasketService:
                     reverse=True,
                 )
             )
-            corr_200 = b.corrs.get('200d')
             rows.append(
                 {
                     'symbol': symbol.upper(),
                     'scenario': name,
                     'weights': wt_str,
-                    'corr': (
-                        round(corr_200.value, 3) if corr_200 else None
-                    ),
-                    'tgt_vol': round(b.vols.target, 1),
-                    'hdg_vol': round(b.vols.hedged, 1),
-                    'vol_red': round(b.vols.reduction, 3),
+                    'corr': round(b.stats.corr, 3),
+                    'beta': round(b.stats.beta, 3),
+                    'vol_red': round(b.stats.vol_reduce, 3),
                     'secs': secs,
                 }
             )
