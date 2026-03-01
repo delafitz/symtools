@@ -23,9 +23,16 @@ class VolTimeStats(BaseModel):
     sigma: float = f(Fmt.sigma)
 
 
+class CostSensitivity(BaseModel):
+    model_config = config()
+    vol_1pct: float = f(Fmt.bps, 'Vol +1%')
+    adv_10pct: float = f(Fmt.bps, 'ADV -10%')
+
+
 class SymbolCostCalcs(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
     discount: VolTimeCalcs = fp(title='Discount')
     stats: VolTimeStats = fp(title='Stats')
+    sensitivity: CostSensitivity = fp(title='Sensitivity')
     alerts: list[Alert] = []

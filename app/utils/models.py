@@ -82,6 +82,16 @@ class Fmt(str, Enum):
             'zero_dash': True,
         },
     )
+    bps = (
+        'bps',
+        {
+            'type': 'number',
+            'precision': 1,
+            'suffix': 'bps',
+            'signed': True,
+            'zero_dash': True,
+        },
+    )
     ratio = ('ratio', {'type': 'number', 'precision': 2})
     mult = (
         'mult',

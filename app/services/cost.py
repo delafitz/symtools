@@ -102,6 +102,11 @@ async def calc_costs(
     pct_mkt_cap = notional / mkt_cap
     pct_float = shares / free_float
 
+    vol_up = get_discount(shares, adv, vol + 1)
+    adv_down = get_discount(shares, adv * 0.9, vol)
+    vol_1pct_bps = round((vol_up - discount) * 10000, 1)
+    adv_10pct_bps = round((adv_down - discount) * 10000, 1)
+
     result = SymbolCostCalcs.model_validate(
         {
             'symbol': snap.symbol,
@@ -117,6 +122,10 @@ async def calc_costs(
                 'pct_float': pct_float,
                 'xadv': xadv,
                 'sigma': sigma,
+            },
+            'sensitivity': {
+                'vol_1pct': vol_1pct_bps,
+                'adv_10pct': adv_10pct_bps,
             },
         }
     )
