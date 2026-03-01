@@ -40,12 +40,12 @@ class SymbolAnalytics(BaseModel):
     symbol: str = f(Fmt.symbol)
     vol: float = f(Fmt.volatility)
     sigma: float = f(Fmt.sigma)
-    adv: float = f(Fmt.volatilityume)
+    adv: float = f(Fmt.volume)
     hist_vol: dict[str, TermStruct] = fp(
         'HistVol', Fmt.volatility, '5d', Fmt.meta
     )
     hist_adv: dict[str, TermStruct] = fp(
-        'ADV', Fmt.volatilityume, '5d', Fmt.meta
+        'ADV', Fmt.volume, '5d', Fmt.meta
     )
     liquidity: Optional[Liquidity] = None
     ratios: Optional[Ratios] = None
