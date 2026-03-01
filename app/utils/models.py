@@ -27,7 +27,7 @@ class Fmt(str, Enum):
         'notional',
         {
             'type': 'number',
-            'precision': 0,
+            'precision': 1,
             'prefix': '$',
             'compact': True,
         },
