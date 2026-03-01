@@ -33,21 +33,16 @@ def _beta_spy(
     sym_ret = (
         hist.tail(BETA_WINDOW)
         .select('date', 'close')
-        .with_columns(
-            pl.col('close').pct_change().alias('r')
-        )
+        .with_columns(pl.col('close').pct_change().alias('r'))
     )
     spy_ret = (
         spy.tail(BETA_WINDOW)
         .select('date', 'close')
-        .with_columns(
-            pl.col('close').pct_change().alias('r')
-        )
+        .with_columns(pl.col('close').pct_change().alias('r'))
     )
-    joined = (
-        sym_ret.join(spy_ret, on='date', suffix='_spy')
-        .drop_nulls()
-    )
+    joined = sym_ret.join(
+        spy_ret, on='date', suffix='_spy'
+    ).drop_nulls()
     if joined.height < 10:
         return None
     cov = joined.select(pl.cov('r', 'r_spy')).item()
@@ -64,7 +59,7 @@ def build_analytics(
     """Build analytics from hist data."""
     vol, vol_table = get_vols(hist)
     adv, adv_table = get_advs(hist)
-    sigma = vol / DAILY_ANN
+    one_sigma = vol / DAILY_ANN
 
     liquidity: Liquidity | None = None
     ratios: Ratios | None = None
@@ -86,9 +81,7 @@ def build_analytics(
             float_short=(
                 short_int / float_shares if float_shares else 0.0
             ),
-            cover_days=(
-                adv / short_int if short_int else 0.0
-            ),
+            cover_days=(short_int / adv if adv else 0.0),
         )
 
     historical: Historical | None = None
@@ -105,8 +98,7 @@ def build_analytics(
         )
         historical = Historical(
             beta=beta,
-            vol=vol,
-            one_sigma=sigma,
+            one_sigma=one_sigma,
             return_1y=return_1y,
             high_pct=high_pct,
         )
@@ -115,7 +107,6 @@ def build_analytics(
         {
             'symbol': symbol,
             'vol': vol,
-            'sigma': sigma,
             'adv': adv,
             'hist_vol': vol_table,
             'hist_adv': adv_table,
