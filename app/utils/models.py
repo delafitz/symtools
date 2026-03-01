@@ -1,7 +1,7 @@
 from enum import Enum
 
-from pydantic import AliasGenerator, ConfigDict, Field
-from pydantic.alias_generators import to_camel, to_snake
+from pydantic import ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
 class Fmt(str, Enum):
@@ -142,8 +142,6 @@ def fp(
 
 def config():
     return ConfigDict(
-        alias_generator=AliasGenerator(
-            validation_alias=to_snake,
-            serialization_alias=to_camel,
-        )
+        alias_generator=to_camel,
+        populate_by_name=True,
     )
