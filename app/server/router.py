@@ -27,8 +27,8 @@ from app.utils.models import Fmt
 router = APIRouter()
 
 
-@router.get('/schema', tags=['schema'])
-def get_schema() -> dict:
+@router.get('/fmt', tags=['fmt'])
+def get_fmt() -> dict:
     return {'formats': {fmt.value: fmt.meta for fmt in Fmt}}
 
 
