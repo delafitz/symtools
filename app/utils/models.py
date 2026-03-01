@@ -67,7 +67,6 @@ class Fmt(str, Enum):
         {
             'type': 'number',
             'precision': 1,
-            'suffix': '%',
             'zero_dash': True,
         },
     )
