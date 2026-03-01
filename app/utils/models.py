@@ -88,6 +88,7 @@ class Fmt(str, Enum):
             'type': 'number',
             'precision': 1,
             'suffix': 'bps',
+            'scale': 10000,
             'signed': True,
             'zero_dash': True,
         },

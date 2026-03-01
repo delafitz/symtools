@@ -104,8 +104,8 @@ async def calc_costs(
 
     vol_up = get_discount(shares, adv, vol + 1)
     adv_down = get_discount(shares, adv * 0.9, vol)
-    vol_1pct_bps = round((vol_up - discount) * 10000, 1)
-    adv_10pct_bps = round((adv_down - discount) * 10000, 1)
+    vol_1pct_bps = vol_up - discount
+    adv_10pct_bps = adv_down - discount
 
     result = SymbolCostCalcs.model_validate(
         {
