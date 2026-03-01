@@ -45,7 +45,7 @@ class Fmt(str, Enum):
     )
     pct = (
         'pct',
-        {'type': 'number', 'precision': 2, 'suffix': '%'},
+        {'type': 'number', 'precision': 1, 'suffix': '%'},
     )
     vol = (
         'vol',
@@ -67,10 +67,7 @@ class Fmt(str, Enum):
         {'type': 'number', 'precision': 1, 'suffix': 'σ'},
     )
     days = ('days', {'type': 'number', 'precision': 1})
-    weight = (
-        'weight',
-        {'type': 'number', 'precision': 2, 'suffix': '%'},
-    )
+    weight = ('weight', {'type': 'number', 'precision': 2})
 
 
 def f(format, title=None, default=...):
