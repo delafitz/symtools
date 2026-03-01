@@ -62,13 +62,12 @@ class Fmt(str, Enum):
             'signed': True,
         },
     )
-    vol = (
-        'vol',
+    volatility = (
+        'volatility',
         {
             'type': 'number',
             'precision': 1,
             'suffix': '%',
-            'scale': 100,
             'zero_dash': True,
         },
     )

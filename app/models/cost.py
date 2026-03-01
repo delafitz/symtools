@@ -10,8 +10,8 @@ class VolTimeCalcs(BaseModel):
     model_config = config()
     notional: float = f(Fmt.notional)
     shares: float = f(Fmt.shares)
-    adv: float = f(Fmt.volume)
-    vol: float = f(Fmt.vol)
+    adv: float = f(Fmt.volatilityume)
+    vol: float = f(Fmt.volatility)
     discount: float = f(Fmt.discount)
 
 

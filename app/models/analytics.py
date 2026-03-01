@@ -29,7 +29,7 @@ class Ratios(BaseModel):
 class Historical(BaseModel):
     model_config = config()
     beta: Optional[float] = f(Fmt.mult, default=None)
-    vol: float = f(Fmt.vol)
+    vol: float = f(Fmt.volatility)
     sigma: float = f(Fmt.sigma)
     return_1y: float = f(Fmt.change)
     high_pct: float = f(Fmt.change)
@@ -38,14 +38,14 @@ class Historical(BaseModel):
 class SymbolAnalytics(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
-    vol: float = f(Fmt.vol)
+    vol: float = f(Fmt.volatility)
     sigma: float = f(Fmt.sigma)
-    adv: float = f(Fmt.volume)
+    adv: float = f(Fmt.volatilityume)
     hist_vol: dict[str, TermStruct] = fp(
-        'HistVol', Fmt.vol, '5d', Fmt.meta
+        'HistVol', Fmt.volatility, '5d', Fmt.meta
     )
     hist_adv: dict[str, TermStruct] = fp(
-        'ADV', Fmt.volume, '5d', Fmt.meta
+        'ADV', Fmt.volatilityume, '5d', Fmt.meta
     )
     liquidity: Optional[Liquidity] = None
     ratios: Optional[Ratios] = None
