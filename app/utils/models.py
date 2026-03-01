@@ -3,32 +3,64 @@ from enum import Enum
 from pydantic import AliasGenerator, ConfigDict, Field
 from pydantic.alias_generators import to_camel, to_snake
 
-# price
-# pctChg (includes +/- and %) i.e. 5d pct return
-#
-# delta -> ADV=shares, Vol=volPoints, Returns=pctChg
-# pctDelta
-
 
 class Fmt(str, Enum):
-    symbol = 'sym'
-    score = 'score'
-    name = 'name'
-    attr = 'attr'
-    term = 'term'
-    shares = 'shares'
-    notional = 'notional'
-    date = 'date'
-    iso = 'iso'
-    meta = 'meta'
-    delta = 'delta'
-    price = 'px'
-    pct = 'pct'
-    vol = 'vol'
-    volume = 'volume'
-    discount = 'discount'
-    ratio = 'ratio'
-    weight = 'weight'
+    """Format type enum with rendering metadata.
+
+    Each member is a (value, meta) tuple. Access
+    rendering hints via `Fmt.price.meta`.
+    """
+
+    def __new__(cls, value, meta=None):
+        obj = str.__new__(cls, value)
+        obj._value_ = value
+        obj.meta = meta or {}
+        return obj
+
+    symbol = ('sym', {'type': 'string'})
+    score = ('score', {'type': 'number', 'precision': 1})
+    name = ('name', {'type': 'string'})
+    attr = ('attr', {'type': 'string'})
+    term = ('term', {'type': 'string'})
+    shares = ('shares', {'type': 'integer', 'compact': True})
+    notional = (
+        'notional',
+        {
+            'type': 'number',
+            'precision': 0,
+            'prefix': '$',
+            'compact': True,
+        },
+    )
+    date = ('date', {'type': 'date'})
+    iso = ('iso', {'type': 'timestamp'})
+    meta = ('meta', {'type': 'string'})
+    delta = (
+        'delta',
+        {'type': 'number', 'precision': 2, 'prefix': '$'},
+    )
+    price = (
+        'px',
+        {'type': 'number', 'precision': 2, 'prefix': '$'},
+    )
+    pct = (
+        'pct',
+        {'type': 'number', 'precision': 2, 'suffix': '%'},
+    )
+    vol = (
+        'vol',
+        {'type': 'number', 'precision': 1, 'suffix': '%'},
+    )
+    volume = ('volume', {'type': 'integer', 'compact': True})
+    discount = (
+        'discount',
+        {'type': 'number', 'precision': 2, 'suffix': '%'},
+    )
+    ratio = ('ratio', {'type': 'number', 'precision': 2})
+    weight = (
+        'weight',
+        {'type': 'number', 'precision': 2, 'suffix': '%'},
+    )
 
 
 def f(format, title=None, default=...):

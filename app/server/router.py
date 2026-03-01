@@ -21,9 +21,15 @@ from app.models.results import (
     SymbolQuote,
 )
 from app.services.stream import stream_symbol
+from app.utils.models import Fmt
 
 
 router = APIRouter()
+
+
+@router.get('/schema', tags=['schema'])
+def get_schema() -> dict:
+    return {'formats': {fmt.value: fmt.meta for fmt in Fmt}}
 
 
 @router.get(
@@ -43,22 +49,52 @@ async def get_refs(request: Request):
     return request.state.cache.get_refs()
 
 
+_SNAPSHOT_EVENTS = {
+    'quote': '#/components/schemas/SymbolQuote',
+    'hist': '#/components/schemas/SymbolHist',
+    'analytics': '#/components/schemas/SymbolAnalytics',
+    'baskets': '#/components/schemas/SymbolBaskets',
+    'basket_hist': '#/components/schemas/BasketHist',
+    'alerts': '#/components/schemas/SymbolAlerts',
+    'done': None,
+}
+
+_SNAPSHOT_SCHEMA = {
+    'responses': {
+        '200': {
+            'description': (
+                'SSE stream. Each event has a named type and a '
+                'JSON data payload matching the schema below.'
+            ),
+            'content': {
+                'text/event-stream': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            name: (
+                                {'$ref': ref}
+                                if ref
+                                else {'type': 'object'}
+                            )
+                            for name, ref in _SNAPSHOT_EVENTS.items()
+                        },
+                    }
+                }
+            },
+        }
+    }
+}
+
+
 @router.get(
     '/snapshot',
     tags=['symbol'],
     response_class=StreamingResponse,
+    openapi_extra=_SNAPSHOT_SCHEMA,
 )
 async def stream_snapshot(symbol: str, request: Request):
-    """
-    SSE endpoint streaming symbol data.
-
-    Events:
-    - quote: SymbolQuote
-    - hist: SymbolHist (Y, then M, W, D)
-    - analytics: SymbolAnalytics
-    - baskets: SymbolBaskets (if available)
-    - basket_hist: BasketHist (one per template, if baskets exist)
-    """
+    """SSE stream of symbol data. Events: quote, hist, analytics,
+    baskets, basket_hist, alerts, done."""
     symbol = symbol.lower()
 
     async def event_generator():
