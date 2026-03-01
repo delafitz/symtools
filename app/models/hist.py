@@ -51,7 +51,7 @@ class HistStats(BaseModel):
     prev_date: str
     prev_close: float = f(Fmt.price)
     range_vwap: float | None = f(Fmt.price, default=None)
-    range_pct_return: float | None = f(Fmt.pct, default=None)
+    range_pct_return: float | None = f(Fmt.change, default=None)
 
 
 class SymbolHist(HistBase):

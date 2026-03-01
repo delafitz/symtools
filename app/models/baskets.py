@@ -23,7 +23,7 @@ class BasketStats(BaseModel):
     weight: float = f(Fmt.weight)
     beta: float = f(Fmt.mult)
     corr: float = f(Fmt.corr)
-    vol_reduce: float = f(Fmt.pct)
+    vol_reduce: float = f(Fmt.change)
 
 
 class Basket(BaseModel):

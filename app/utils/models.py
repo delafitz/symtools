@@ -45,16 +45,43 @@ class Fmt(str, Enum):
     )
     pct = (
         'pct',
-        {'type': 'number', 'precision': 1, 'suffix': '%'},
+        {
+            'type': 'number',
+            'precision': 1,
+            'suffix': '%',
+            'scale': 100,
+        },
+    )
+    change = (
+        'change',
+        {
+            'type': 'number',
+            'precision': 1,
+            'suffix': '%',
+            'scale': 100,
+            'signed': True,
+        },
     )
     vol = (
         'vol',
-        {'type': 'number', 'precision': 1, 'suffix': '%'},
+        {
+            'type': 'number',
+            'precision': 1,
+            'suffix': '%',
+            'scale': 100,
+            'zero_dash': True,
+        },
     )
     volume = ('volume', {'type': 'integer', 'compact': True})
     discount = (
         'discount',
-        {'type': 'number', 'precision': 2, 'suffix': '%'},
+        {
+            'type': 'number',
+            'precision': 2,
+            'suffix': '%',
+            'scale': 100,
+            'zero_dash': True,
+        },
     )
     ratio = ('ratio', {'type': 'number', 'precision': 2})
     mult = (
@@ -64,9 +91,17 @@ class Fmt(str, Enum):
     corr = ('corr', {'type': 'number', 'precision': 2})
     sigma = (
         'sigma',
-        {'type': 'number', 'precision': 1, 'suffix': 'σ'},
+        {
+            'type': 'number',
+            'precision': 1,
+            'suffix': 'σ',
+            'zero_dash': True,
+        },
     )
-    days = ('days', {'type': 'number', 'precision': 1})
+    days = (
+        'days',
+        {'type': 'number', 'precision': 1, 'zero_dash': True},
+    )
     weight = ('weight', {'type': 'number', 'precision': 2})
 
 

@@ -31,8 +31,8 @@ class Historical(BaseModel):
     beta: Optional[float] = f(Fmt.mult, default=None)
     vol: float = f(Fmt.vol)
     sigma: float = f(Fmt.sigma)
-    return_1y: float = f(Fmt.pct)
-    high_pct: float = f(Fmt.pct)
+    return_1y: float = f(Fmt.change)
+    high_pct: float = f(Fmt.change)
 
 
 class SymbolAnalytics(BaseModel):
