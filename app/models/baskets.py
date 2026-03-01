@@ -20,18 +20,18 @@ class BasketParams(BaseModel):
 
 class BasketStats(BaseModel):
     model_config = config()
-    weight: float = f(Fmt.ratio)
-    beta: float = f(Fmt.ratio)
-    corr: float = f(Fmt.ratio)
+    weight: float = f(Fmt.weight)
+    beta: float = f(Fmt.mult)
+    corr: float = f(Fmt.corr)
     vol_reduce: float = f(Fmt.pct)
 
 
 class Basket(BaseModel):
     model_config = config()
     params: BasketParams = fp('Params')
-    weights: dict[str, float] = fp('Weights', Fmt.ratio)
+    weights: dict[str, float] = fp('Weights', Fmt.weight)
     stats: BasketStats = fp('Stats')
-    corrs: dict[str, TermStruct] = fp('Corrs', Fmt.ratio)
+    corrs: dict[str, TermStruct] = fp('Corrs', Fmt.corr)
 
 
 class SymbolBaskets(BaseModel):

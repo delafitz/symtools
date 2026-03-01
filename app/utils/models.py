@@ -57,6 +57,16 @@ class Fmt(str, Enum):
         {'type': 'number', 'precision': 2, 'suffix': '%'},
     )
     ratio = ('ratio', {'type': 'number', 'precision': 2})
+    mult = (
+        'mult',
+        {'type': 'number', 'precision': 2, 'suffix': 'x'},
+    )
+    corr = ('corr', {'type': 'number', 'precision': 2})
+    sigma = (
+        'sigma',
+        {'type': 'number', 'precision': 1, 'suffix': 'σ'},
+    )
+    days = ('days', {'type': 'number', 'precision': 1})
     weight = (
         'weight',
         {'type': 'number', 'precision': 2, 'suffix': '%'},

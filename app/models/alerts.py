@@ -8,7 +8,7 @@ class Alert(BaseModel):
     rule: str = f(Fmt.attr)
     category: str = f(Fmt.attr)
     level: str = f(Fmt.attr)
-    score: float = f(Fmt.ratio)
+    score: float = f(Fmt.score)
     label: str = f(Fmt.attr)
     desc: str = f(Fmt.attr)
     value: float | None = f(Fmt.ratio, default=None)
@@ -20,5 +20,5 @@ class Alert(BaseModel):
 class SymbolAlerts(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
-    score: float = f(Fmt.ratio)
+    score: float = f(Fmt.score)
     alerts: list[Alert] = []
