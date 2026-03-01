@@ -13,6 +13,7 @@ from app.utils.market import (
     DT_FMT,
     ET,
     MARKET_OPEN,
+    is_weekday,
     last_trading_day,
     last_weekday,
     prev_weekday,
@@ -291,7 +292,8 @@ class PriceService:
             today_d = last_weekday(now_et.date())
             end_d = (
                 prev_weekday(today_d)
-                if now_et.time() < MARKET_OPEN
+                if is_weekday(now_et.date())
+                and now_et.time() < MARKET_OPEN
                 else today_d
             )
             end_date = end_d.strftime(DT_FMT)
