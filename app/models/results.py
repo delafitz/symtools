@@ -38,7 +38,7 @@ class SymbolQuote(BaseModel):
     volume: float = f(Fmt.volume)
     chg: float = f(Fmt.price)
     pct_chg: float = f(Fmt.change)
-    session: str | None = f(Fmt.attr, default=None)
+    session: str = f(Fmt.attr)
     session_last: float | None = f(Fmt.price, default=None)
     session_chg: float | None = f(Fmt.price, default=None)
     session_volume: float | None = f(Fmt.volume, default=None)

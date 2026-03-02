@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo
+
 import polars as pl
 from massive import RESTClient
 
@@ -5,6 +7,8 @@ from app.models.results import SymbolQuote
 from app.utils.dates import ns_to_dt
 from app.utils.logger import get_logger
 from app.utils.market import get_session
+
+ET = ZoneInfo('America/New_York')
 
 log = get_logger(__name__)
 
@@ -67,18 +71,21 @@ def fetch_quote(client: RESTClient, symbol: str) -> SymbolQuote:
     }
 
     session = get_session(s.updated // 1_000_000)
+    quote['session'] = session
     if session in ('pre', 'post'):
         ref = s.prev_day.close if session == 'pre' else close
-        quote['session'] = session
         quote['session_last'] = last
         quote['session_chg'] = last - ref
         if s.min and s.min.accumulated_volume > 0:
             quote['session_volume'] = float(s.min.accumulated_volume)
-    elif session == 'closed':
-        quote['session'] = session
 
     min_close = float(s.min.close) if s.min else 0.0
     min_vol = float(s.min.accumulated_volume) if s.min else 0.0
+    updated_et = (
+        ns_to_dt(s.updated)
+        .astimezone(ET)
+        .strftime('%Y-%m-%d %H:%M:%S %Z')
+    )
     table = pl.DataFrame(
         data={
             'field': [
@@ -147,6 +154,7 @@ def fetch_quote(client: RESTClient, symbol: str) -> SymbolQuote:
                 quote.get('session_chg'),
                 quote.get('session_volume'),
             ],
+            'ts': [updated_et] + [None] * 8,
         }
     )
     log.cyan(f'quote {symbol.upper()} [{session}]\n{table}')
