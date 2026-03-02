@@ -70,7 +70,7 @@ def fetch_quote(client: RESTClient, symbol: str) -> SymbolQuote:
         'pct_chg': pct_chg,
     }
 
-    session = get_session(s.updated // 1_000_000)
+    session = get_session()
     quote['session'] = session
     if session in ('pre', 'post'):
         ref = s.prev_day.close if session == 'pre' else close

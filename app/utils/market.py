@@ -83,10 +83,17 @@ def get_close_ts(date_str: str) -> int:
     return get_session_ts(date_str, MARKET_CLOSE)
 
 
-def get_session(ts_ms: int) -> str:
-    """Classify a ms timestamp as pre/market/post."""
-    dt = datetime.fromtimestamp(ts_ms / 1000, tz=ET)
-    t = dt.time()
+def get_session() -> str:
+    """Classify current market session.
+
+    Uses current time, not the quote timestamp — session
+    answers 'what is open now', not 'when was the last tick'.
+    Returns 'closed' on weekends regardless of time.
+    """
+    now = datetime.now(ET)
+    if not is_weekday(now.date()):
+        return 'closed'
+    t = now.time()
     if t < PRE_MARKET_OPEN:
         return 'closed'
     if t < MARKET_OPEN:
