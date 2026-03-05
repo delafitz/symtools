@@ -34,7 +34,18 @@ class Basket(BaseModel):
     corrs: dict[str, TermStruct] = fp('Corrs', Fmt.corr)
 
 
+class BasketSummaryRow(BaseModel):
+    model_config = config()
+    basket: str = f(Fmt.attr)
+    symbols: str = f(Fmt.attr)
+    weight: float = f(Fmt.weight)
+    beta: float = f(Fmt.mult)
+    corr: float = f(Fmt.corr)
+    reduce: float = f(Fmt.change)
+
+
 class SymbolBaskets(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
     baskets: dict[str, Basket]
+    summary: list[BasketSummaryRow] = []
