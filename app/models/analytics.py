@@ -15,31 +15,29 @@ class Liquidity(BaseModel):
     model_config = config()
     mkt_cap: float = f(Fmt.notional)
     shares_out: int = f(Fmt.shares)
-    float_shares: int = f(Fmt.shares)
-    short_int: int = f(Fmt.shares)
+    float_shares: int = f(Fmt.shares, title='Float')
+    short_int: int = f(Fmt.shares, title='SI')
 
 
 class Ratios(BaseModel):
     model_config = config()
-    float_out: float = f(Fmt.pct)
-    float_short: float = f(Fmt.pct)
-    cover_days: float = f(Fmt.days)
+    float_out: float = f(Fmt.pct, title='Float/SO')
+    float_short: float = f(Fmt.pct, title='SI/Float')
+    cover_days: float = f(Fmt.days, title='DaysToCov')
 
 
 class Historical(BaseModel):
     model_config = config()
+    one_sigma: float = f(Fmt.volatility, title='OneSig')
     beta: Optional[float] = f(Fmt.mult, default=None)
-    vol: float = f(Fmt.volatility)
-    sigma: float = f(Fmt.sigma)
-    return_1y: float = f(Fmt.change)
-    high_pct: float = f(Fmt.change)
+    return_1y: float = f(Fmt.change, title='52W Ret')
+    high_pct: float = f(Fmt.change, title='52W Disc')
 
 
 class SymbolAnalytics(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
     vol: float = f(Fmt.volatility)
-    sigma: float = f(Fmt.sigma)
     adv: float = f(Fmt.volume)
     hist_vol: dict[str, TermStruct] = fp(
         'HistVol', Fmt.volatility, '5d', Fmt.meta

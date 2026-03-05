@@ -185,10 +185,16 @@ class Cache:
         self.basket_svc = BasketService(self.refs, self.hists)
         self.basket_svc.startup()
 
+        spy_hist = self.get_hist('spy', HIST_TEMPLATE_DEFAULT)
         for symbol in self.basket_svc.baskets:
             hist = self.get_hist(symbol, HIST_TEMPLATE_DEFAULT)
             if hist is not None:
-                self.analytics[symbol] = build_analytics(symbol, hist)
+                self.analytics[symbol] = build_analytics(
+                    symbol,
+                    hist,
+                    ref=self.get_ref(symbol),
+                    spy_hist=spy_hist,
+                )
 
     async def startup(self) -> None:
         """Initialize cache on application startup."""
@@ -447,7 +453,12 @@ class Cache:
         if hist is None or hist.is_empty():
             return None
 
-        analytics = build_analytics(symbol, hist)
+        analytics = build_analytics(
+            symbol,
+            hist,
+            ref=self.get_ref(symbol),
+            spy_hist=self.get_hist('spy', HIST_TEMPLATE_DEFAULT),
+        )
         self.analytics[symbol] = analytics
         return analytics
 

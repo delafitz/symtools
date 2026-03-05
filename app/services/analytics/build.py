@@ -59,7 +59,7 @@ def build_analytics(
     """Build analytics from hist data."""
     vol, vol_table = get_vols(hist)
     adv, adv_table = get_advs(hist)
-    one_sigma = vol / DAILY_ANN
+    one_sigma = vol / DAILY_ANN * 100
 
     liquidity: Liquidity | None = None
     ratios: Ratios | None = None
