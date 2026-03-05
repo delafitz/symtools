@@ -140,8 +140,15 @@ def fp(
     )
 
 
+def _title(name: str) -> str:
+    """snake_case → PascalCase for schema titles."""
+    c = to_camel(name)
+    return c[0].upper() + c[1:] if c else c
+
+
 def config():
     return ConfigDict(
         alias_generator=to_camel,
         populate_by_name=True,
+        title_generator=_title,
     )
