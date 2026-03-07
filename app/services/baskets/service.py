@@ -150,7 +150,7 @@ class BasketService:
         rows = []
         for name, b in baskets.items():
             syms = ', '.join(
-                s
+                s.upper()
                 for s, _ in sorted(
                     b.weights.items(),
                     key=lambda x: x[1],

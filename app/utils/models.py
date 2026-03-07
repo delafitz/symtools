@@ -2,6 +2,7 @@ from enum import Enum
 
 from pydantic import ConfigDict, Field
 from pydantic.alias_generators import to_camel
+from pydantic.fields import FieldInfo
 
 
 class Fmt(str, Enum):
@@ -18,6 +19,7 @@ class Fmt(str, Enum):
         return obj
 
     symbol = ('sym', {'type': 'string'})
+    csv = ('csv', {'type': 'string'})
     score = ('score', {'type': 'number', 'precision': 1})
     name = ('name', {'type': 'string'})
     attr = ('attr', {'type': 'string'})
@@ -140,15 +142,21 @@ def fp(
     )
 
 
-def _title(name: str) -> str:
-    """snake_case → PascalCase for schema titles."""
-    c = to_camel(name)
-    return c[0].upper() + c[1:] if c else c
+def _title(name: str, field_info: FieldInfo) -> str:
+    """snake_case field name → PascalCase title.
+
+    Respects explicitly set titles; auto-generates from
+    field name otherwise (mkt_cap → MktCap).
+    """
+    if field_info.title:
+        return field_info.title
+    camel = to_camel(name)
+    return camel[0].upper() + camel[1:] if camel else camel
 
 
 def config():
     return ConfigDict(
         alias_generator=to_camel,
         populate_by_name=True,
-        title_generator=_title,
+        field_title_generator=_title,
     )

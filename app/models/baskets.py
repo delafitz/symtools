@@ -23,7 +23,7 @@ class BasketStats(BaseModel):
     weight: float = f(Fmt.weight)
     beta: float = f(Fmt.mult)
     corr: float = f(Fmt.corr)
-    vol_reduce: float = f(Fmt.change)
+    vol_reduce: float = f(Fmt.pct)
 
 
 class Basket(BaseModel):
@@ -37,11 +37,11 @@ class Basket(BaseModel):
 class BasketSummaryRow(BaseModel):
     model_config = config()
     basket: str = f(Fmt.attr)
-    symbols: str = f(Fmt.attr)
+    symbols: str = f(Fmt.csv)
     weight: float = f(Fmt.weight)
     beta: float = f(Fmt.mult)
     corr: float = f(Fmt.corr)
-    reduce: float = f(Fmt.change)
+    reduce: float = f(Fmt.pct)
 
 
 class SymbolBaskets(BaseModel):
