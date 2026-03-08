@@ -23,7 +23,7 @@ class BasketStats(BaseModel):
     weight: float = f(Fmt.weight)
     beta: float = f(Fmt.mult)
     corr: float = f(Fmt.corr)
-    vol_reduce: float = f(Fmt.pct)
+    vol_reduce: float = f(Fmt.pct, title='Reduce')
 
 
 class Basket(BaseModel):
@@ -34,18 +34,7 @@ class Basket(BaseModel):
     corrs: dict[str, TermStruct] = fp('Corrs', Fmt.corr)
 
 
-class BasketSummaryRow(BaseModel):
-    model_config = config()
-    basket: str = f(Fmt.attr)
-    symbols: str = f(Fmt.csv)
-    weight: float = f(Fmt.weight)
-    beta: float = f(Fmt.mult)
-    corr: float = f(Fmt.corr)
-    reduce: float = f(Fmt.pct)
-
-
 class SymbolBaskets(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
     baskets: dict[str, Basket]
-    summary: list[BasketSummaryRow] = []

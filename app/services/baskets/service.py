@@ -4,7 +4,7 @@ from time import perf_counter
 
 import polars as pl
 
-from app.models.baskets import Basket, BasketSummaryRow, SymbolBaskets
+from app.models.baskets import Basket, SymbolBaskets
 from app.services.prices import HIST_TEMPLATE_DEFAULT
 from app.services.baskets.barra import (
     BarraModel,
@@ -83,13 +83,10 @@ class BasketService:
         if not baskets:
             return None
 
-        summary = self._build_summary(baskets)
-        result = SymbolBaskets(
-            symbol=symbol, baskets=baskets, summary=summary
-        )
+        result = SymbolBaskets(symbol=symbol, baskets=baskets)
         self.baskets[symbol] = result
         self._save_weights()
-        self._log_summary(symbol, baskets, summary, elapsed)
+        self._log_summary(symbol, baskets, elapsed)
         return result
 
     def get(self, symbol: str) -> SymbolBaskets | None:
@@ -143,51 +140,13 @@ class BasketService:
             )
         return rows
 
-    @staticmethod
-    def _build_summary(
-        baskets: dict[str, Basket],
-    ) -> list[BasketSummaryRow]:
-        rows = []
-        for name, b in baskets.items():
-            syms = ', '.join(
-                s.upper()
-                for s, _ in sorted(
-                    b.weights.items(),
-                    key=lambda x: x[1],
-                    reverse=True,
-                )
-            )
-            rows.append(
-                BasketSummaryRow(
-                    basket=name,
-                    symbols=syms,
-                    weight=b.stats.weight,
-                    beta=b.stats.beta,
-                    corr=b.stats.corr,
-                    reduce=b.stats.vol_reduce,
-                )
-            )
-        return rows
-
     def _log_summary(
         self,
         symbol: str,
         baskets: dict[str, Basket],
-        summary: list[BasketSummaryRow],
         elapsed: float,
     ) -> None:
         rows = self._summary_rows(symbol, baskets, elapsed)
-        summary_rows = [
-            {
-                'basket': r.basket,
-                'symbols': r.symbols,
-                'weight': round(r.weight, 3),
-                'beta': round(r.beta, 3),
-                'corr': round(r.corr, 3),
-                'reduce': round(r.reduce, 3),
-            }
-            for r in summary
-        ]
         with pl.Config(
             tbl_rows=-1,
             tbl_width_chars=160,
@@ -198,11 +157,6 @@ class BasketService:
                     f'basket {symbol} '
                     f'({elapsed:.1f}s):\n'
                     f'{pl.DataFrame(rows)}'
-                )
-            if summary_rows:
-                log.yellow(
-                    f'basket summary {symbol}:\n'
-                    f'{pl.DataFrame(summary_rows)}'
                 )
 
     def _get_hist(
@@ -242,11 +196,9 @@ class BasketService:
                 symbol, hist, self.hists, scenarios
             )
             if baskets:
-                summary = self._build_summary(baskets)
                 self.baskets[symbol] = SymbolBaskets(
                     symbol=symbol,
                     baskets=baskets,
-                    summary=summary,
                 )
                 count += 1
 
@@ -292,11 +244,9 @@ class BasketService:
                 continue
 
             baskets, elapsed = result
-            summary = self._build_summary(baskets)
             self.baskets[symbol] = SymbolBaskets(
                 symbol=symbol,
                 baskets=baskets,
-                summary=summary,
             )
             rows.extend(self._summary_rows(symbol, baskets, elapsed))
 
