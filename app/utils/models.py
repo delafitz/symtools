@@ -36,7 +36,7 @@ class Fmt(str, Enum):
     )
     date = ('date', {'type': 'date'})
     iso = ('iso', {'type': 'timestamp'})
-    meta = ('meta', {'type': 'number', 'precision': 1})
+    meta = ('meta', {'type': 'number', 'precision': 1, 'signed': True})
     delta = (
         'delta',
         {'type': 'number', 'precision': 2, 'prefix': '$'},

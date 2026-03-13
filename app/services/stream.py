@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING, AsyncGenerator
 
 from pydantic import BaseModel
 
+from app.models.inputs import SymbolOverrides
+from app.services.cost import calc_costs
 from app.services.hist import build_basket_hists
 from app.services.prices import (
     HIST_TEMPLATES,
@@ -69,7 +71,17 @@ async def stream_symbol(
     if analytics:
         yield ('analytics', analytics)
 
-    # 4. Baskets (cached or on-demand)
+    # 4. Cost (1 ADV default)
+    if analytics and analytics.adv > 0:
+        overrides = SymbolOverrides(
+            symbol=symbol,
+            shares=analytics.adv / 1e6,
+        )
+        cost = await calc_costs(cache, overrides)
+        if cost:
+            yield ('cost', cost)
+
+    # 5. Baskets (cached or on-demand)
     basket_svc = cache.basket_svc
     baskets = cache.get_baskets(symbol)
     if not baskets and basket_svc:
@@ -83,14 +95,14 @@ async def stream_symbol(
         for sc in baskets.baskets.values():
             basket_syms.update(sc.weights.keys())
 
-    # 5. Fetch real today bars for target + basket syms
+    # 6. Fetch real today bars for target + basket syms
     today_bars = await cache.fetch_today_bars_async(
         {symbol} | basket_syms
     )
     if symbol in today_bars:
         prices.replace_today_bar(today_bars[symbol])
 
-    # 6. Per-template: hist → basket_hists
+    # 7. Per-template: hist → basket_hists
     for template in HIST_TEMPLATES:
         if template in ('Y', 'M'):
             # Re-yield with real today bar
@@ -170,7 +182,7 @@ async def stream_symbol(
             else:
                 log.yellow(f'{symbol} {template} tracking: None')
 
-    # 7. Alerts
+    # 8. Alerts
     from app.services.alerts import AlertContext, evaluate
 
     ctx = AlertContext(
