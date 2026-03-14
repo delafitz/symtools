@@ -319,14 +319,15 @@ Rule-based signals evaluated from symbol data. Decorator-based registry: `@rule(
 **AlertContext** — single data bag with optional fields (`ref`, `analytics`, `baskets`, `daily`, `costs`, `overrides`). Rules check for required data and return `None` if unavailable.
 
 **Rule categories** (`app/services/alerts/rules/`):
-- `liquidity` — `low_liquidity` (ADV < 1% float), `high_turnover` (ADV > 5% float)
-- `volatility` — `high_vol` (>50%), `vol_disperse` (30d/90d divergence), `vol_change` (30d > 1.3x 90d)
-- `moves` — `sigma_move_{1,3,5}d` (return vs sigma)
+- `liquidity` — `low_liquidity` (dollar ADV < $20M), `high_turnover` (ADV > 5% float), `low_float` (<60%), `high_days_to_cover` (>5d)
+- `volatility` — `high_vol` (>50%), `vol_disperse` (30d/90d divergence >20%), `vol_change` (10d/30d spike >1.3x), `high_beta` (>1.5x SPY), `near_52w_high` (<5% from high), `near_52w_low` (<5% from low)
+- `historical` — `high_momentum` (12M-1M >50%), `low_momentum` (12M-1M <-20%)
+- `moves` — `sigma_move_{1,3,5}d` (return vs sigma), `hedged_sigma_moves` (1.5σ hedged, all baskets, 1/3/5D)
 - `baskets` — `poor_index_hedge` (200d corr < 0.2), `no_good_hedges` (no scenario > 0.5 corr)
-- `cost` — `size_pct_float`, `high_adv_multiple`, `override_vol_mismatch`, `override_adv_mismatch`
+- `cost` — `size_pct_mktcap` (>5%), `high_adv_multiple` (>5x), `override_vol_mismatch`, `override_adv_mismatch`
 
 **Integration**:
-- SSE stream: emitted as step 8 (after all hists + basket_hists), excludes cost category
+- SSE stream: emitted as step 8 (after all hists + basket_hists), runs all categories except `cost`
 - `/cost` endpoint: cost-category alerts included in `SymbolCostCalcs.alerts`
 
 **Cache** (`app/server/cache.py`):

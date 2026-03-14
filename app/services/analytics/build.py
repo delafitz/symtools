@@ -23,6 +23,8 @@ ADV_DELTAS = [5]
 VOLUME = 'volume'
 
 BETA_WINDOW = 200
+MOM_WINDOW = 250  # ~12 months
+MOM_SKIP = 21    # skip last month (reversal)
 
 
 def _beta_spy(
@@ -93,6 +95,14 @@ def build_analytics(
         high_pct = end / high_1y if high_1y else 1.0
         low_1y = hist['low'].min() or end
         low_pct = end / low_1y if low_1y else 1.0
+        closes = hist['close']
+        n = len(closes)
+        momentum: float | None = None
+        if n > MOM_SKIP:
+            skip_close = closes[-(MOM_SKIP + 1)]
+            start_close = closes[-min(n, MOM_WINDOW + 1)]
+            if start_close > 0:
+                momentum = float(skip_close / start_close - 1)
         beta = (
             _beta_spy(hist, spy_hist)
             if spy_hist is not None and not spy_hist.is_empty()
@@ -104,6 +114,7 @@ def build_analytics(
             return_1y=return_1y,
             high_pct=high_pct,
             low_pct=low_pct,
+            momentum=momentum,
         )
 
     return SymbolAnalytics.model_validate(

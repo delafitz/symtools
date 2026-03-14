@@ -9,6 +9,8 @@ from app.services.alerts import (
 _HIGH_BETA = 1.5       # SPY beta
 _NEAR_HIGH_PCT = 0.05  # within 5% of 52W high
 _NEAR_LOW_PCT = 0.05   # within 5% of 52W low
+_HIGH_MOM = 0.50       # 12M-1M momentum > 50% (top ~25%)
+_LOW_MOM = -0.20       # 12M-1M momentum < -20% (bottom ~14%)
 
 
 @rule('volatility')
@@ -76,5 +78,52 @@ def near_52w_low(ctx: AlertContext) -> Alert | None:
         value=low_pct,
         value_format='pct',
         threshold=1.0 + _NEAR_LOW_PCT,
+        threshold_format='pct',
+    )
+
+
+@rule('historical')
+def high_momentum(ctx: AlertContext) -> Alert | None:
+    """Strong positive 12M-1M momentum (top ~25% of universe)."""
+    if not ctx.analytics or not ctx.analytics.historical:
+        return None
+    mom = ctx.analytics.historical.momentum
+    if mom is None or mom <= _HIGH_MOM:
+        return None
+    score = _scale(mom, _HIGH_MOM)
+    return Alert(
+        rule='high_momentum',
+        category='historical',
+        level=_level(score),
+        score=score,
+        label='HighMom',
+        desc='12M-1M momentum > 50%',
+        value=mom,
+        value_format='pct',
+        threshold=_HIGH_MOM,
+        threshold_format='pct',
+    )
+
+
+@rule('historical')
+def low_momentum(ctx: AlertContext) -> Alert | None:
+    """Strong negative 12M-1M momentum (bottom ~14% of universe)."""
+    if not ctx.analytics or not ctx.analytics.historical:
+        return None
+    mom = ctx.analytics.historical.momentum
+    if mom is None or mom >= _LOW_MOM:
+        return None
+    # flip signs: larger magnitude below zero → higher severity
+    score = _scale(-mom, -_LOW_MOM)
+    return Alert(
+        rule='low_momentum',
+        category='historical',
+        level=_level(score),
+        score=score,
+        label='LowMom',
+        desc='12M-1M momentum < -20%',
+        value=mom,
+        value_format='pct',
+        threshold=_LOW_MOM,
         threshold_format='pct',
     )
