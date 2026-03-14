@@ -53,6 +53,7 @@ _SNAPSHOT_EVENTS = {
     'quote': '#/components/schemas/SymbolQuote',
     'hist': '#/components/schemas/SymbolHist',
     'analytics': '#/components/schemas/SymbolAnalytics',
+    'cost': '#/components/schemas/SymbolCostCalcs',
     'baskets': '#/components/schemas/SymbolBaskets',
     'basket_hist': '#/components/schemas/BasketHist',
     'alerts': '#/components/schemas/SymbolAlerts',
