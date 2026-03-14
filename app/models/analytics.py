@@ -30,8 +30,9 @@ class Historical(BaseModel):
     model_config = config()
     one_sigma: float = f(Fmt.volatility, title='OneSig')
     beta: Optional[float] = f(Fmt.mult, default=None)
-    return_1y: float = f(Fmt.change, title='52W Ret')
-    high_pct: float = f(Fmt.change, title='52W Disc')
+    return_1y: float = f(Fmt.change, title='1Y Ret')
+    high_pct: float = f(Fmt.ratio, title='1Y Disc')
+    low_pct: float = f(Fmt.ratio, title='1Y Low')
 
 
 class SymbolAnalytics(BaseModel):

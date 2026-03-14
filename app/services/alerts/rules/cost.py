@@ -6,15 +6,20 @@ from app.services.alerts import (
     rule,
 )
 
+_PCT_FLOAT_THRESHOLD = 0.10
+_PCT_MKTCAP_THRESHOLD = 0.05
+_XADV_THRESHOLD = 5.0
+_DISCOUNT_THRESHOLD = 0.07  # 7% market impact
+
 
 @rule('cost')
 def size_pct_float(ctx: AlertContext) -> Alert | None:
     if not ctx.costs:
         return None
     pct = ctx.costs.stats.pct_float
-    if pct <= 0.10:
+    if pct <= _PCT_FLOAT_THRESHOLD:
         return None
-    score = _scale(pct, 0.10)
+    score = _scale(pct, _PCT_FLOAT_THRESHOLD)
     return Alert(
         rule='size_pct_float',
         category='cost',
@@ -24,7 +29,29 @@ def size_pct_float(ctx: AlertContext) -> Alert | None:
         desc='Shares > 10% of float',
         value=pct,
         value_format='pct',
-        threshold=0.10,
+        threshold=_PCT_FLOAT_THRESHOLD,
+        threshold_format='pct',
+    )
+
+
+@rule('cost')
+def size_pct_mktcap(ctx: AlertContext) -> Alert | None:
+    if not ctx.costs:
+        return None
+    pct = ctx.costs.stats.pct_mkt_cap
+    if pct <= _PCT_MKTCAP_THRESHOLD:
+        return None
+    score = _scale(pct, _PCT_MKTCAP_THRESHOLD)
+    return Alert(
+        rule='size_pct_mktcap',
+        category='cost',
+        level=_level(score),
+        score=score,
+        label='PctMktCap',
+        desc='Deal > 5% of mkt cap',
+        value=pct,
+        value_format='pct',
+        threshold=_PCT_MKTCAP_THRESHOLD,
         threshold_format='pct',
     )
 
@@ -34,9 +61,9 @@ def high_adv_multiple(ctx: AlertContext) -> Alert | None:
     if not ctx.costs:
         return None
     xadv = ctx.costs.stats.xadv
-    if xadv <= 5:
+    if xadv <= _XADV_THRESHOLD:
         return None
-    score = _scale(xadv, 5.0)
+    score = _scale(xadv, _XADV_THRESHOLD)
     return Alert(
         rule='high_adv_multiple',
         category='cost',
@@ -45,9 +72,31 @@ def high_adv_multiple(ctx: AlertContext) -> Alert | None:
         label='xADV',
         desc='xADV > 5',
         value=xadv,
-        value_format='ratio',
-        threshold=5.0,
-        threshold_format='ratio',
+        value_format='mult',
+        threshold=_XADV_THRESHOLD,
+        threshold_format='mult',
+    )
+
+
+@rule('cost')
+def high_discount(ctx: AlertContext) -> Alert | None:
+    if not ctx.costs:
+        return None
+    discount = abs(ctx.costs.discount.discount)
+    if discount <= _DISCOUNT_THRESHOLD:
+        return None
+    score = _scale(discount, _DISCOUNT_THRESHOLD)
+    return Alert(
+        rule='high_discount',
+        category='cost',
+        level=_level(score),
+        score=score,
+        label='Discount',
+        desc='Market impact > 7%',
+        value=discount,
+        value_format='pct',
+        threshold=_DISCOUNT_THRESHOLD,
+        threshold_format='pct',
     )
 
 

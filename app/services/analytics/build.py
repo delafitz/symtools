@@ -13,7 +13,7 @@ from app.services.analytics.window import get_all_windows
 DAILY_ANN = 252**0.5 * 100
 
 VOL_DEFAULT = 30
-VOL_WINDOWS = [30, 90]
+VOL_WINDOWS = [10, 30, 90]
 VOL_DELTAS = [5]
 PCT_CHG = 'pct_chg'
 
@@ -91,6 +91,8 @@ def build_analytics(
         return_1y = (end / start - 1) if start else 0.0
         high_1y = hist['high'].max() or end
         high_pct = end / high_1y if high_1y else 1.0
+        low_1y = hist['low'].min() or end
+        low_pct = end / low_1y if low_1y else 1.0
         beta = (
             _beta_spy(hist, spy_hist)
             if spy_hist is not None and not spy_hist.is_empty()
@@ -101,6 +103,7 @@ def build_analytics(
             one_sigma=one_sigma,
             return_1y=return_1y,
             high_pct=high_pct,
+            low_pct=low_pct,
         )
 
     return SymbolAnalytics.model_validate(

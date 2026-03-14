@@ -36,18 +36,14 @@ def poor_index_hedge(ctx: AlertContext) -> Alert | None:
 def no_good_hedges(ctx: AlertContext) -> Alert | None:
     if not ctx.baskets:
         return None
-    best_corr: float | None = None
+    best_corr: float = 0.0
     for basket in ctx.baskets.baskets.values():
         corr = basket.stats.corr
         if corr > 0.5:
             return None
-        if best_corr is None or corr > best_corr:
+        if corr > best_corr:
             best_corr = corr
-    score = (
-        _scale(best_corr, 0.5, above=False)
-        if best_corr is not None
-        else 0.6
-    )
+    score = _scale(best_corr, 0.5, above=False)
     return Alert(
         rule='no_good_hedges',
         category='baskets',
@@ -56,7 +52,7 @@ def no_good_hedges(ctx: AlertContext) -> Alert | None:
         label='LowBaskets',
         desc='No scenario corr > 0.5',
         value=best_corr,
-        value_format='ratio' if best_corr is not None else None,
+        value_format='ratio',
         threshold=0.5,
         threshold_format='ratio',
     )

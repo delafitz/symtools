@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -25,11 +26,19 @@ def rule(category: str):
 
 
 def _level(score: float) -> str:
-    if score > 0.66:
+    if score >= 0.75:
         return 'alert'
-    if score >= 0.34:
+    if score >= 0.50:
         return 'warn'
     return 'info'
+
+
+# Sigmoid steepness. At k=2.2:
+#   severity 1.0x (at threshold) → score 0.50
+#   severity 1.5x               → score 0.75
+#   severity 2.0x               → score 0.90
+#   severity 3.0x               → score 0.98
+_K = 2.2
 
 
 def _scale(
@@ -37,16 +46,20 @@ def _scale(
     threshold: float,
     above: bool = True,
 ) -> float:
-    """Score 0.3–0.9 based on distance past threshold.
+    """Sigmoid score in (0, 1) based on distance past threshold.
 
     above=True: value > threshold is bad (most rules)
     above=False: value < threshold is bad
+
+    Returns 0.5 exactly at threshold, approaches 1.0 for
+    extreme values. Rules should only call this after
+    confirming the threshold is crossed (score will be ≥ 0.5).
     """
     if above:
         severity = value / threshold
     else:
         severity = threshold / max(value, 1e-9)
-    return min(0.9, 0.3 + 0.4 * (severity - 1))
+    return 1 / (1 + math.exp(-_K * (severity - 1)))
 
 
 @dataclass

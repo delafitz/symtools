@@ -21,8 +21,8 @@ class BasketParams(BaseModel):
 class BasketStats(BaseModel):
     model_config = config()
     weight: float = f(Fmt.weight)
-    beta: float = f(Fmt.mult)
     corr: float = f(Fmt.corr)
+    beta: float = f(Fmt.mult)
     vol_reduce: float = f(Fmt.pct, title='Reduce')
 
 
