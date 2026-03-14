@@ -88,7 +88,6 @@ def evaluate(
         return None
     return SymbolAlerts(
         symbol=ctx.symbol,
-        score=max(a.score for a in alerts),
         alerts=alerts,
     )
 

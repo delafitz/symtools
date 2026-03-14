@@ -20,5 +20,4 @@ class Alert(BaseModel):
 class SymbolAlerts(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
-    score: float = f(Fmt.score)
     alerts: list[Alert] = []
