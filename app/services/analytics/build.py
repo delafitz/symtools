@@ -91,8 +91,12 @@ def build_analytics(
     historical: Historical | None = None
     if not hist.is_empty():
         end = hist['close'].tail(1).item()
-        end_date = hist['date'].tail(1).item()
-        one_year_ago = end_date - datetime.timedelta(days=365)
+        end_date = datetime.date.fromisoformat(
+            hist['date'].tail(1).item()
+        )
+        one_year_ago = (
+            end_date - datetime.timedelta(days=365)
+        ).isoformat()
         start_row = hist.filter(
             pl.col('date') >= one_year_ago
         ).head(1)

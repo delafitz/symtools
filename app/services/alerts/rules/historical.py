@@ -1,3 +1,5 @@
+import datetime
+
 from app.models.alerts import Alert
 from app.services.alerts import (
     AlertContext,
@@ -22,7 +24,9 @@ def short_history(ctx: AlertContext) -> Alert | None:
     dates = ctx.daily['date']
     if len(dates) < 2:
         return None
-    days = (dates[-1] - dates[0]).days
+    d0 = datetime.date.fromisoformat(dates[0])
+    d1 = datetime.date.fromisoformat(dates[-1])
+    days = (d1 - d0).days
     if days >= _MIN_HIST_DAYS:
         return None
     score = _scale(days, _MIN_HIST_DAYS, above=False)
