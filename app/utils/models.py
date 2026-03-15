@@ -118,7 +118,13 @@ class Fmt(str, Enum):
     weight = ('weight', {'type': 'number', 'precision': 2})
 
 
-def f(format, title=None, default=..., hidden=False):
+def f(
+    format,
+    title=None,
+    default=...,
+    hidden=False,
+    description=None,
+):
     extra: dict = {'format': format}
     if hidden:
         extra['hidden'] = True
@@ -128,6 +134,8 @@ def f(format, title=None, default=..., hidden=False):
     }
     if default is not ...:
         kwargs['default'] = default
+    if description is not None:
+        kwargs['description'] = description
     return Field(**kwargs)
 
 

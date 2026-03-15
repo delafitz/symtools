@@ -1,15 +1,31 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.utils.models import Fmt, config, f, fp
 
 
 class TermStruct(BaseModel):
+    """Rolling window stat with optional trailing time series.
+
+    value: current window value (e.g. 30d vol)
+    meta: 5d lookback delta (vol: absolute pp, adv: % change)
+    series: 100 [date, value] pairs, oldest first. Last entry
+            date is the most recent trading day (T-1); last
+            entry value equals `value`.
+    """
+
     model_config = config()
     value: float
     meta: Optional[float] = None
-    series: Optional[list[tuple[str, float]]] = None
+    series: Optional[list[tuple[str, float]]] = Field(
+        default=None,
+        description=(
+            '100 [date, value] pairs oldest-first. '
+            'Last date is T-1 (most recent trading day); '
+            'last value equals `value`.'
+        ),
+    )
 
 
 class Liquidity(BaseModel):
