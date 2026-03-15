@@ -95,14 +95,28 @@ async def stream_symbol(
         for sc in baskets.baskets.values():
             basket_syms.update(sc.weights.keys())
 
-    # 6. Fetch real today bars for target + basket syms
+    # 7. Alerts (all non-cost categories)
+    from app.services.alerts import AlertContext, evaluate
+
+    ctx = AlertContext(
+        symbol=symbol,
+        ref=cache.get_ref(symbol),
+        analytics=analytics,
+        baskets=baskets,
+        daily=prices.daily,
+    )
+    alerts = evaluate(ctx)
+    if alerts:
+        yield ('alerts', alerts)
+
+    # 8. Fetch real today bars for target + basket syms
     today_bars = await cache.fetch_today_bars_async(
         {symbol} | basket_syms
     )
     if symbol in today_bars:
         prices.replace_today_bar(today_bars[symbol])
 
-    # 7. Per-template: hist → basket_hists
+    # 9. Per-template: hist → basket_hists
     for template in HIST_TEMPLATES:
         if template in ('Y', 'M'):
             # Re-yield with real today bar
@@ -182,16 +196,3 @@ async def stream_symbol(
             else:
                 log.yellow(f'{symbol} {template} tracking: None')
 
-    # 8. Alerts
-    from app.services.alerts import AlertContext, evaluate
-
-    ctx = AlertContext(
-        symbol=symbol,
-        ref=cache.get_ref(symbol),
-        analytics=analytics,
-        baskets=baskets,
-        daily=prices.daily,
-    )
-    alerts = evaluate(ctx)
-    if alerts:
-        yield ('alerts', alerts)
