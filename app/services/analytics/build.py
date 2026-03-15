@@ -165,20 +165,21 @@ def get_vols(hist, windows=VOL_WINDOWS, deltas=VOL_DELTAS):
         deltas,
     )
     for w in windows:
-        series = (
+        rows = (
             returns.select(
+                pl.col('date'),
                 (
                     pl.col(PCT_CHG)
                     .rolling_std(window_size=w)
                     * DAILY_ANN
-                ).alias('v')
+                ).alias('v'),
             )
             .drop_nulls()
             .tail(SERIES_LENGTH)
-            ['v']
-            .to_list()
         )
-        table[f'{w}d']['series'] = series
+        table[f'{w}d']['series'] = list(
+            zip(rows['date'].to_list(), rows['v'].to_list())
+        )
     return vol, table
 
 
@@ -192,16 +193,17 @@ def get_advs(hist, windows=ADV_WINDOWS, deltas=ADV_DELTAS):
         daily_volume, expr, windows, deltas, 'pct'
     )
     for w in windows:
-        series = (
+        rows = (
             daily_volume.select(
+                pl.col('date'),
                 pl.col(VOLUME)
                 .rolling_mean(window_size=w)
-                .alias('v')
+                .alias('v'),
             )
             .drop_nulls()
             .tail(SERIES_LENGTH)
-            ['v']
-            .to_list()
         )
-        table[f'{w}d']['series'] = series
+        table[f'{w}d']['series'] = list(
+            zip(rows['date'].to_list(), rows['v'].to_list())
+        )
     return adv, table
