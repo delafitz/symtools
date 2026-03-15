@@ -89,7 +89,7 @@ def hedged_sigma_moves(ctx: AlertContext) -> Alert | None:
                 level=_level(score),
                 score=score,
                 label=_HEDGE_LABELS[n],
-                desc=f'{n}d% > 1.5\u03c3 hedged ({scenario})',
+                desc=f'{n}d% > 1.5\u03c3 hdg ({scenario})',
                 value=abs(ret),
                 value_format='pct',
                 threshold=threshold,
