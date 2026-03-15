@@ -9,6 +9,7 @@ class TermStruct(BaseModel):
     model_config = config()
     value: float
     meta: Optional[float] = None
+    series: Optional[list[float]] = None
 
 
 class Liquidity(BaseModel):

@@ -27,6 +27,7 @@ VOLUME = 'volume'
 BETA_WINDOW = 200
 MOM_WINDOW = 250  # ~12 months
 MOM_SKIP = 21    # skip last month (reversal)
+SERIES_LENGTH = 90  # trailing data points per window
 
 
 def _beta_spy(
@@ -163,6 +164,21 @@ def get_vols(hist, windows=VOL_WINDOWS, deltas=VOL_DELTAS):
         windows,
         deltas,
     )
+    for w in windows:
+        series = (
+            returns.select(
+                (
+                    pl.col(PCT_CHG)
+                    .rolling_std(window_size=w)
+                    * DAILY_ANN
+                ).alias('v')
+            )
+            .drop_nulls()
+            .tail(SERIES_LENGTH)
+            ['v']
+            .to_list()
+        )
+        table[f'{w}d']['series'] = series
     return vol, table
 
 
@@ -175,4 +191,17 @@ def get_advs(hist, windows=ADV_WINDOWS, deltas=ADV_DELTAS):
     table = get_all_windows(
         daily_volume, expr, windows, deltas, 'pct'
     )
+    for w in windows:
+        series = (
+            daily_volume.select(
+                pl.col(VOLUME)
+                .rolling_mean(window_size=w)
+                .alias('v')
+            )
+            .drop_nulls()
+            .tail(SERIES_LENGTH)
+            ['v']
+            .to_list()
+        )
+        table[f'{w}d']['series'] = series
     return adv, table
