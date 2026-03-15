@@ -108,9 +108,11 @@ def build_analytics(
         return_1y = (
             (end / start_1y - 1) if start_1y else 0.0
         )
-        high_1y = hist['high'].max() or end
+        hist_1y = hist.filter(pl.col('date') >= one_year_ago)
+        h = hist_1y if not hist_1y.is_empty() else hist
+        high_1y = h['high'].max() or end
         high_pct = end / high_1y if high_1y else 1.0
-        low_1y = hist['low'].min() or end
+        low_1y = h['low'].min() or end
         low_pct = end / low_1y if low_1y else 1.0
         closes = hist['close']
         n = len(closes)
