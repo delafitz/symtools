@@ -10,7 +10,7 @@ class Alert(BaseModel):
     level: str = f(Fmt.attr)
     score: float = f(Fmt.score)
     label: str = f(Fmt.attr)
-    desc: str = f(Fmt.attr)
+    desc: str = f(Fmt.longtext)
     value: float | None = f(Fmt.ratio, default=None)
     value_format: str | None = f(Fmt.attr, default=None)
     threshold: float | None = f(Fmt.ratio, default=None)

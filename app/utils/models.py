@@ -23,6 +23,7 @@ class Fmt(str, Enum):
     score = ('score', {'type': 'number', 'precision': 2})
     name = ('name', {'type': 'string'})
     attr = ('attr', {'type': 'string'})
+    longtext = ('longtext', {'type': 'string'})
     term = ('term', {'type': 'string'})
     shares = ('shares', {'type': 'integer', 'compact': True})
     notional = (
