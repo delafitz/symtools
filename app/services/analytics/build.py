@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+
 import polars as pl
 
 from app.models.analytics import (
@@ -89,8 +91,19 @@ def build_analytics(
     historical: Historical | None = None
     if not hist.is_empty():
         end = hist['close'].tail(1).item()
-        start = hist['close'].head(1).item()
-        return_1y = (end / start - 1) if start else 0.0
+        end_date = hist['date'].tail(1).item()
+        one_year_ago = end_date - datetime.timedelta(days=365)
+        start_row = hist.filter(
+            pl.col('date') >= one_year_ago
+        ).head(1)
+        start_1y = (
+            start_row['close'].item()
+            if not start_row.is_empty()
+            else None
+        )
+        return_1y = (
+            (end / start_1y - 1) if start_1y else 0.0
+        )
         high_1y = hist['high'].max() or end
         high_pct = end / high_1y if high_1y else 1.0
         low_1y = hist['low'].min() or end
