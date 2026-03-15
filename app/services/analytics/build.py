@@ -27,7 +27,7 @@ VOLUME = 'volume'
 BETA_WINDOW = 200
 MOM_WINDOW = 250  # ~12 months
 MOM_SKIP = 21    # skip last month (reversal)
-SERIES_LENGTH = 90  # trailing data points per window
+SERIES_LENGTH = 100  # trailing data points per window
 
 
 def _beta_spy(
