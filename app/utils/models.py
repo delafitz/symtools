@@ -24,6 +24,7 @@ class Fmt(str, Enum):
     name = ('name', {'type': 'string'})
     attr = ('attr', {'type': 'string'})
     longtext = ('longtext', {'type': 'string'})
+    dynamic = ('dynamic', {'type': 'number'})
     term = ('term', {'type': 'string'})
     shares = ('shares', {'type': 'integer', 'compact': True})
     notional = (

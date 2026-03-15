@@ -11,9 +11,9 @@ class Alert(BaseModel):
     score: float = f(Fmt.score)
     label: str = f(Fmt.attr)
     desc: str = f(Fmt.longtext)
-    value: float | None = f(Fmt.ratio, default=None)
+    value: float | None = f(Fmt.dynamic, default=None)
     value_format: str | None = f(Fmt.attr, default=None)
-    threshold: float | None = f(Fmt.ratio, default=None)
+    threshold: float | None = f(Fmt.dynamic, default=None)
     threshold_format: str | None = f(Fmt.attr, default=None)
 
 
