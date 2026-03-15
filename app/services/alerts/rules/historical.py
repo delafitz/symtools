@@ -11,6 +11,33 @@ _NEAR_HIGH_PCT = 0.05  # within 5% of 52W high
 _NEAR_LOW_PCT = 0.05   # within 5% of 52W low
 _HIGH_MOM = 0.50       # 12M-1M momentum > 50% (top ~25%)
 _LOW_MOM = -0.20       # 12M-1M momentum < -20% (bottom ~14%)
+_MIN_HIST_DAYS = 365   # calendar days of required history
+
+
+@rule('historical')
+def short_history(ctx: AlertContext) -> Alert | None:
+    """Less than 365 calendar days of price history."""
+    if ctx.daily is None or ctx.daily.is_empty():
+        return None
+    dates = ctx.daily['date']
+    if len(dates) < 2:
+        return None
+    days = (dates[-1] - dates[0]).days
+    if days >= _MIN_HIST_DAYS:
+        return None
+    score = _scale(days, _MIN_HIST_DAYS, above=False)
+    return Alert(
+        rule='short_history',
+        category='historical',
+        level=_level(score),
+        score=score,
+        label='ShortHist',
+        desc='Less than 1Y of price history',
+        value=float(days),
+        value_format='days',
+        threshold=float(_MIN_HIST_DAYS),
+        threshold_format='days',
+    )
 
 
 @rule('volatility')
