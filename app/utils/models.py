@@ -20,7 +20,7 @@ class Fmt(str, Enum):
 
     symbol = ('sym', {'type': 'string'})
     csv = ('csv', {'type': 'string'})
-    score = ('score', {'type': 'number', 'precision': 1})
+    score = ('score', {'type': 'number', 'precision': 2})
     name = ('name', {'type': 'string'})
     attr = ('attr', {'type': 'string'})
     term = ('term', {'type': 'string'})
