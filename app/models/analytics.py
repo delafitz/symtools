@@ -30,9 +30,9 @@ class Historical(BaseModel):
     model_config = config()
     one_sigma: float = f(Fmt.volatility, title='OneSig')
     beta: Optional[float] = f(Fmt.mult, default=None)
-    return_1y: float = f(Fmt.change, title='1Y Ret')
+    return_1y: float = f(Fmt.change, title='1Y Ret', hidden=True)
     high_pct: float = f(Fmt.ratio, title='1Y Disc')
-    low_pct: float = f(Fmt.ratio, title='1Y Low')
+    low_pct: float = f(Fmt.ratio, title='1Y Low', hidden=True)
     momentum: Optional[float] = f(Fmt.change, default=None)
 
 
