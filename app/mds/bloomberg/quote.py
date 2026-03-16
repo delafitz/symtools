@@ -8,6 +8,7 @@ from app.mds.bloomberg.session import (
 )
 from app.models.results import SymbolQuote
 from app.utils.logger import get_logger
+from app.utils.market import get_session
 
 log = get_logger(__name__)
 
@@ -71,8 +72,10 @@ def fetch_quote(
         'pct_chg': pct_chg,
     }
 
-    # Extended hours — Bloomberg provides
-    # separate fields for pre/post
+    # Extended hours — Bloomberg fields for pre/post;
+    # fall back to clock-based get_session() for 'closed'.
+    # session_volume: no snapshot equivalent in BBG
+    # (requires intraday subscription), left as null.
     pre_px = fd.get('PRE_MKT_LAST_PRICE')
     post_px = fd.get('AFTER_MKT_LAST_PRICE')
     if post_px and post_px > 0:
@@ -83,6 +86,10 @@ def fetch_quote(
         quote['session'] = 'pre'
         quote['session_last'] = pre_px
         quote['session_chg'] = pre_px - prev
+    else:
+        session = get_session()
+        if session == 'closed':
+            quote['session'] = 'closed'
 
     table = pl.DataFrame(
         data={

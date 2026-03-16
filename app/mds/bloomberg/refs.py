@@ -7,6 +7,7 @@ from app.mds.bloomberg.session import (
     sec,
 )
 from app.mds.polygon.refs import TICKER_SCHEMA
+from app.utils.corp import strip_name
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -19,7 +20,8 @@ MIN_MKT_CAP = 1e9
 DETAIL_FIELDS = [
     'CIK_NUMBER',
     'SIC_CODE',
-    'EQY_SH_OUT',  # millions
+    'GICS_SECTOR_NAME',
+    'EQY_SH_OUT',   # millions
     'CUR_MKT_CAP',  # millions
 ]
 
@@ -92,7 +94,7 @@ def list_tickers(
                 [
                     fd.get('TICKER', '').lower(),
                     fd.get('EXCH_CODE', ''),
-                    fd.get('NAME', ''),
+                    strip_name(fd.get('NAME', '')),
                     fd.get('CRNCY', 'USD'),
                 ]
             )
@@ -132,7 +134,10 @@ def fetch_details(
                     'shares_out': (
                         int(shares * 1e6) if shares else 0
                     ),
-                    'mkt_cap': (float(mkt_cap) * 1e6),
+                    'mkt_cap': float(mkt_cap) * 1e6,
+                    'g_sector': fd.get(
+                        'GICS_SECTOR_NAME', ''
+                    ),
                 }
     return None
 
