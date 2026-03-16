@@ -65,7 +65,7 @@ def build_baskets(
 
         target_sector = barra_model.exposures.get(
             symbol,
-            BarraExposure(0, 0, 0, 0, 0, 0, ''),
+            BarraExposure(0, 0, 0, 0, 0, 0, 0),
         ).sector
         p = (params or {}).get(next(iter(scenarios)), DEFAULT_PARAMS)
 

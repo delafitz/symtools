@@ -59,14 +59,14 @@ class BarraExposure:
     beta: float
     resvol: float
     liquidity: float
-    sector: str
+    sector: int  # 0 = unknown, 1+ = sector ID
 
 
 @dataclass
 class BarraModel:
     factor_returns: pl.DataFrame
     exposures: dict[str, BarraExposure] = field(default_factory=dict)
-    sectors: list[str] = field(default_factory=list)
+    sector_names: dict[int, str] = field(default_factory=dict)
     n_stocks: int = 0
     n_factors: int = 0
 
@@ -182,12 +182,26 @@ def build_barra_model(
             stocks.get_column('mkt_cap').to_list(),
         )
     )
-    sector_map: dict[str, str] = dict(
+    # Enumerate unique sector names → int IDs (1-indexed, 0 = unknown)
+    sector_str_map: dict[str, str] = dict(
         zip(
             stocks.get_column('symbol').to_list(),
             stocks.get_column('g_sector').to_list(),
         )
     )
+    unique_sector_names = sorted(
+        s for s in set(sector_str_map.values()) if s
+    )
+    sector_name_to_id: dict[str, int] = {
+        name: i + 1 for i, name in enumerate(unique_sector_names)
+    }
+    id_to_sector_name: dict[int, str] = {
+        i + 1: name for i, name in enumerate(unique_sector_names)
+    }
+    sector_map: dict[str, int] = {
+        s: sector_name_to_id.get(sec, 0)
+        for s, sec in sector_str_map.items()
+    }
 
     # Close prices for momentum/reversal
     close_long = dense_hists.sort('symbol', 'date').select(
@@ -236,30 +250,33 @@ def build_barra_model(
     factor_market = spy_ret.copy()
     factor_style = {name: np.zeros(n_days) for name in style_names}
 
-    # Active sectors
-    sector_counts: dict[str, int] = {}
+    # Active sector IDs (>= MIN_SECTOR_STOCKS members)
+    sector_counts: dict[int, int] = {}
     for s in syms:
-        sec = sector_map.get(s, '')
-        if sec:
-            sector_counts[sec] = sector_counts.get(sec, 0) + 1
-    active_sectors = sorted(
-        s for s, c in sector_counts.items() if c >= MIN_SECTOR_STOCKS
+        sid = sector_map.get(s, 0)
+        if sid:
+            sector_counts[sid] = sector_counts.get(sid, 0) + 1
+    active_sector_ids = sorted(
+        sid for sid, c in sector_counts.items()
+        if c >= MIN_SECTOR_STOCKS
     )
-    factor_sector = {sec: np.zeros(n_days) for sec in active_sectors}
+    factor_sector: dict[int, np.ndarray] = {
+        sid: np.zeros(n_days) for sid in active_sector_ids
+    }
 
     # Build sector membership (static)
-    sector_members: dict[str, list[int]] = {
-        sec: [] for sec in active_sectors
+    sector_members: dict[int, list[int]] = {
+        sid: [] for sid in active_sector_ids
     }
     for i, s in enumerate(syms):
-        sec = sector_map.get(s, '')
-        if sec in sector_members:
-            sector_members[sec].append(i)
+        sid = sector_map.get(s, 0)
+        if sid in sector_members:
+            sector_members[sid].append(i)
 
     # Sector returns (equal-weight daily)
-    for sec, members in sector_members.items():
+    for sid, members in sector_members.items():
         if members:
-            factor_sector[sec] = mat[:, members].mean(axis=1)
+            factor_sector[sid] = mat[:, members].mean(axis=1)
 
     # Last exposure snapshot (for the model output)
     last_exposures: dict[str, BarraExposure] = {}
@@ -382,7 +399,7 @@ def build_barra_model(
                     beta=float(exposures['beta'][i]),
                     resvol=float(exposures['resvol'][i]),
                     liquidity=float(exposures['liquidity'][i]),
-                    sector=sector_map.get(s, ''),
+                    sector=sector_map.get(s, 0),
                 )
 
     # 6. Combine into factor_returns DataFrame
@@ -392,18 +409,17 @@ def build_barra_model(
     }
     for name in style_names:
         factor_cols[name] = factor_style[name].tolist()
-    for sec in active_sectors:
-        col = f'sector_{sec}'.replace(' ', '_')
-        factor_cols[col] = factor_sector[sec].tolist()
+    for sid in active_sector_ids:
+        factor_cols[f'sector_{sid}'] = factor_sector[sid].tolist()
 
     factor_df = pl.DataFrame(factor_cols).slice(1)
 
-    n_factors = 1 + len(style_names) + len(active_sectors)
+    n_factors = 1 + len(style_names) + len(active_sector_ids)
 
     model = BarraModel(
         factor_returns=factor_df,
         exposures=last_exposures,
-        sectors=active_sectors,
+        sector_names=id_to_sector_name,
         n_stocks=n_syms,
         n_factors=n_factors,
     )
@@ -434,15 +450,15 @@ def get_factor_returns(
     return matched.drop('date')
 
 
-def _sector_key(name: str) -> str:
-    """Sector name → skfolio group key (no spaces)."""
-    return name.replace(' ', '_')
+def _sector_key(sector_id: int) -> str:
+    """Sector int ID → skfolio group key."""
+    return f'sector_{sector_id}'
 
 
 def build_sector_constraints(
     model: BarraModel,
     columns: list[str],
-    target_sector: str,
+    target_sector: int,
     max_budget: float,
     floor_pct: float = SECTOR_FLOOR_PCT,
     cap_pct: float = SECTOR_CAP_PCT,
@@ -452,34 +468,32 @@ def build_sector_constraints(
     Returns None if no symbols have sectors (ETF-only).
     """
     groups: dict[str, list[str]] = {}
-    sectors_present: set[str] = set()
+    sectors_present: set[int] = set()
 
     for sym in columns:
         exp = model.exposures.get(sym)
-        sec = exp.sector if exp else ''
-        if not sec:
+        sid = exp.sector if exp else 0
+        if not sid:
             continue
-        key = _sector_key(sec)
-        groups[sym] = [key]
-        sectors_present.add(sec)
+        groups[sym] = [_sector_key(sid)]
+        sectors_present.add(sid)
 
     if not groups:
         return None
 
     constraints: list[str] = []
-    target_key = _sector_key(target_sector)
 
     # Floor: target's sector must get >= floor_pct * budget
     if target_sector and target_sector in sectors_present:
         floor = floor_pct * max_budget
-        constraints.append(f'{target_key} >= {floor}')
+        constraints.append(f'{_sector_key(target_sector)} >= {floor}')
 
     # Cap: each off-sector <= cap_pct * budget
     cap = cap_pct * max_budget
-    for sec in sorted(sectors_present):
-        if sec == target_sector:
+    for sid in sorted(sectors_present):
+        if sid == target_sector:
             continue
-        constraints.append(f'{_sector_key(sec)} <= {cap}')
+        constraints.append(f'{_sector_key(sid)} <= {cap}')
 
     return groups, constraints
 
@@ -504,10 +518,12 @@ def _assign_quintiles(
 
 def _log_summary(
     model: BarraModel,
-    sector_members: dict[str, list[int]],
+    sector_members: dict[int, list[int]],
 ) -> None:
     sector_str = ' '.join(
-        f'{s}({len(m)})' for s, m in sector_members.items() if m
+        f'{model.sector_names.get(sid, str(sid))}({len(m)})'
+        for sid, m in sector_members.items()
+        if m
     )
     log.cyan(
         f'barra: {model.n_stocks} stocks, '
