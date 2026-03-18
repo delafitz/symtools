@@ -39,12 +39,31 @@ L1_COEF: float = 1e-5
 # =============================================================================
 # SECTOR NEUTRALITY
 # =============================================================================
-# Floor: minimum fraction of budget in target's sector.
-# Cap: maximum fraction of budget per off-sector.
+# Floor: minimum fraction of budget allocated to target's sector.
+# A floor of 0.60 × 0.20 = 0.12 — above THRESHOLD_LONG (0.10) —
+# guarantees that at least one same-sector instrument is selected
+# with meaningful weight.
+#
+# Cap: maximum fraction of budget per off-sector group.
+# A cap of 0.50 × 0.20 = 0.10 = THRESHOLD_LONG limits each
+# off-sector to at most one instrument at minimum weight.
+#
 # Only applied in stage 2 (SCIP) for scenarios with stocks.
 
-SECTOR_FLOOR_PCT: float = 0.30
+SECTOR_FLOOR_PCT: float = 0.60
 SECTOR_CAP_PCT: float = 0.50
+
+# =============================================================================
+# SINGLES LIQUIDITY
+# =============================================================================
+# Absolute minimum market cap for singles candidates.
+# Applied as a hard floor regardless of target size.
+MIN_SINGLE_MKT_CAP: float = 1e9  # $1B
+
+# Relative minimum: candidate mkt_cap >= this fraction of target's.
+# Scales the liquidity requirement with position size.
+# effective_floor = max(MIN_SINGLE_MKT_CAP, MIN_SINGLE_REL_CAP * target_cap)
+MIN_SINGLE_REL_CAP: float = 0.10  # 10% of target
 
 # =============================================================================
 # SOLVER SETTINGS

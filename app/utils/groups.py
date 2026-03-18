@@ -20,12 +20,13 @@ SINGLES = 'singles'
 COMBINED = 'combined'
 
 # Scenario definitions: name -> (label, groups)
-# Groups are filtered from unified hists by type
+# Groups are filtered from unified hists by type.
+# 'combined' is built separately in scenarios.py
+# (best-correlated ETF + singles).
 SCENARIOS = {
     'indices': ('Indices', [INDICES]),
     'factors': ('Factors', [FACTORS]),
     'singles': ('Singles', [SINGLES]),
-    'combined': ('Combined', [INDICES, FACTORS, SINGLES]),
 }
 
 
