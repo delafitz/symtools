@@ -72,6 +72,12 @@ def build_baskets(
         sc_groups: dict[str, dict[str, list[str]] | None] = {}
         sc_lin: dict[str, list[str] | None] = {}
         for name, returns in scenarios.items():
+            # Combined has one ETF + singles: ETF anchors sector
+            # exposure, so sector constraints are not applied.
+            if name == 'combined':
+                sc_groups[name] = None
+                sc_lin[name] = None
+                continue
             columns = [
                 c
                 for c in returns.columns

@@ -43,9 +43,18 @@ log = get_logger(__name__)
 
 
 def load_data() -> tuple[pl.DataFrame, pl.DataFrame] | None:
-    """Load refs + hists from today's parquet."""
-    refs = get_store('refs')
-    hists = get_store('hists')
+    """Load refs + hists from the most recent parquet."""
+    from pathlib import Path
+
+    def latest(name: str) -> pl.DataFrame | None:
+        files = sorted(Path('data').glob(f'{name}.*.parquet'))
+        if not files:
+            return None
+        print(f'loading {files[-1].name}')
+        return pl.read_parquet(files[-1])
+
+    refs = latest('refs')
+    hists = latest('hists')
     if refs is None:
         print('no refs parquet found')
         return None
@@ -160,11 +169,16 @@ def run_comparison(
 
     # Build sector constraints per barra scenario
     target_sector = barra.exposures.get(
-        symbol, BarraExposure(0, 0, 0, 0, 0, 0, '')
+        symbol, BarraExposure(0, 0, 0, 0, 0, 0, 0)
     ).sector
     sc_groups: dict[str, dict[str, list[str]] | None] = {}
     sc_lin: dict[str, list[str] | None] = {}
     for name, returns in barra_scenarios.items():
+        if name == 'combined':
+            sc_groups[name] = None
+            sc_lin[name] = None
+            log.info('sector constraints [combined]: none (ETF)')
+            continue
         columns = [
             c for c in returns.columns if c not in ('date', 'target')
         ]
@@ -328,7 +342,7 @@ def main() -> None:
         f'factors: {barra.n_factors}  '
         f'dates: {len(barra.factor_returns)}'
     )
-    print(f'sectors: {", ".join(barra.sectors)}')
+    print(f'sectors: {", ".join(barra.sector_names.values())}')
 
     # Run comparisons
     for sym in symbols:
