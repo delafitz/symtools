@@ -11,8 +11,6 @@ from app.services.baskets.barra import (
     get_factor_returns,
     get_prior,
 )
-from app.services.baskets.config import ModelChoice
-from app.services.baskets.factors import EmpModel
 from app.services.baskets.opt import DEFAULT_PARAMS, run_opts
 from app.services.baskets.risk import calc_stats
 from app.services.baskets.scenarios import (
@@ -20,7 +18,108 @@ from app.services.baskets.scenarios import (
     get_returns,
     get_scenarios,
 )
+from app.utils.groups import COMBINED, get_all_etf_symbols
+from app.utils.logger import get_logger
 from app.utils.market import slice_hist
+
+log = get_logger(__name__)
+
+
+def _pick_top_etf(
+    factors_weights: pl.DataFrame,
+) -> str | None:
+    """Top-weight ETF from the factors optimization result.
+
+    Uses the factors opt output directly — it already ran with
+    the Barra prior, so the highest-weight ETF is the
+    model-selected hedge candidate for combined.
+    """
+    if factors_weights.is_empty():
+        return None
+    sym_col = factors_weights.columns[0]
+    etf_syms = set(get_all_etf_symbols())
+    etf_rows = factors_weights.filter(
+        pl.col(sym_col).is_in(etf_syms)
+    )
+    if etf_rows.is_empty():
+        return None
+    return etf_rows.sort('weight', descending=True).get_column(
+        sym_col
+    )[0]
+
+
+def _build_combined(
+    top_etf: str,
+    scenarios: dict[str, pl.DataFrame],
+) -> pl.DataFrame | None:
+    """Build combined returns: top_etf column + singles.
+
+    ETF column is taken from scenarios['factors'] (already
+    computed). Singles provide single-stock candidates.
+    The combined opt runs unconstrained by sector — the ETF
+    anchors market/sector exposure; singles complement freely.
+    """
+    if 'factors' not in scenarios:
+        return None
+    if top_etf not in scenarios['factors'].columns:
+        return None
+    if 'singles' not in scenarios:
+        return None
+
+    etf_col = scenarios['factors'].select(['date', top_etf])
+    comb = pl.concat(
+        [etf_col, scenarios['singles']],
+        how='align_left',
+    ).drop_nulls()
+
+    if len(comb) > MIN_HIST:
+        comb = comb.tail(MIN_HIST)
+    return comb if len(comb) >= MIN_HIST else None
+
+
+def _run_combined(
+    symbol: str,
+    scenarios: dict[str, pl.DataFrame],
+    opts: dict,
+    params: dict[str, BasketParams] | None,
+    barra_model: BarraModel,
+    prior,
+) -> None:
+    """Build and run combined scenario, updating scenarios +
+    opts in-place.
+
+    Picks the top-weight ETF from the factors optimization,
+    builds combined returns (ETF + singles), and runs a
+    separate Barra opt with no sector constraints.
+    """
+    top_etf = _pick_top_etf(
+        opts.get('factors', {}).get('weights', pl.DataFrame())
+    )
+    if not top_etf:
+        return
+
+    comb_data = _build_combined(top_etf, scenarios)
+    if comb_data is None:
+        return
+
+    scenarios[COMBINED] = comb_data
+    comb_fr = get_factor_returns(
+        barra_model,
+        sorted(set(comb_data['date'].to_list())),
+    )
+    comb_opts = run_opts(
+        symbol,
+        {COMBINED: comb_data},
+        params,
+        prior_estimator=prior,
+        factor_returns=comb_fr,
+    )
+    opts.update(comb_opts)
+    log.info(
+        f'combined: etf={top_etf} '
+        f'cols={comb_data.width} '
+        f'rows={comb_data.height}'
+    )
 
 
 def build_baskets(
@@ -29,84 +128,71 @@ def build_baskets(
     refs: pl.DataFrame,
     hists: pl.DataFrame,
     params: dict[str, BasketParams] | None = None,
-    emp_model: EmpModel | None = None,
     barra_model: BarraModel | None = None,
-    model_choice: ModelChoice = 'emp',
 ) -> dict[str, Basket] | None:
     """Build basket optimizations for a symbol."""
-    if model_choice == 'barra':
-        scenarios = get_scenarios(
-            symbol,
-            hist,
-            refs,
-            hists,
-            barra_model=barra_model,
-        )
-    else:
-        scenarios = get_scenarios(
-            symbol,
-            hist,
-            refs,
-            hists,
-            emp_model=emp_model,
-        )
+    scenarios = get_scenarios(
+        symbol,
+        hist,
+        refs,
+        hists,
+        barra_model=barra_model,
+    )
 
     if not scenarios:
         return None
 
-    # Barra: compute prior + sector constraints
-    if model_choice == 'barra' and barra_model:
-        prior = get_prior()
+    prior = get_prior()
 
-        all_dates: list[str] = []
-        for returns in scenarios.values():
-            all_dates.extend(returns.get_column('date').to_list())
-        fr = get_factor_returns(barra_model, sorted(set(all_dates)))
+    all_dates: list[str] = []
+    for returns in scenarios.values():
+        all_dates.extend(returns.get_column('date').to_list())
+    fr = get_factor_returns(barra_model, sorted(set(all_dates)))
 
-        target_sector = barra_model.exposures.get(
-            symbol,
-            BarraExposure(0, 0, 0, 0, 0, 0, 0),
-        ).sector
-        p = (params or {}).get(next(iter(scenarios)), DEFAULT_PARAMS)
+    target_sector = barra_model.exposures.get(
+        symbol,
+        BarraExposure(0, 0, 0, 0, 0, 0, 0),
+    ).sector if barra_model else 0
+    p = (params or {}).get(next(iter(scenarios)), DEFAULT_PARAMS)
 
-        sc_groups: dict[str, dict[str, list[str]] | None] = {}
-        sc_lin: dict[str, list[str] | None] = {}
-        for name, returns in scenarios.items():
-            # Combined has one ETF + singles: ETF anchors sector
-            # exposure, so sector constraints are not applied.
-            if name == 'combined':
-                sc_groups[name] = None
-                sc_lin[name] = None
-                continue
-            columns = [
-                c
-                for c in returns.columns
-                if c not in ('date', 'target')
-            ]
-            sc = build_sector_constraints(
-                barra_model,
-                columns,
-                target_sector,
-                p.max_budget,
-            )
-            if sc:
-                sc_groups[name] = sc[0]
-                sc_lin[name] = sc[1]
-            else:
-                sc_groups[name] = None
-                sc_lin[name] = None
+    sc_groups: dict[str, dict[str, list[str]] | None] = {}
+    sc_lin: dict[str, list[str] | None] = {}
+    for name, returns in scenarios.items():
+        columns = [
+            c
+            for c in returns.columns
+            if c not in ('date', 'target')
+        ]
+        sc = build_sector_constraints(
+            barra_model,
+            columns,
+            target_sector,
+            p.max_budget,
+        ) if barra_model else None
+        if sc:
+            sc_groups[name] = sc[0]
+            sc_lin[name] = sc[1]
+        else:
+            sc_groups[name] = None
+            sc_lin[name] = None
 
-        opts = run_opts(
-            symbol,
-            scenarios,
-            params,
-            prior_estimator=prior,
-            factor_returns=fr,
-            groups=sc_groups,
-            linear_constraints=sc_lin,
+    opts = run_opts(
+        symbol,
+        scenarios,
+        params,
+        prior_estimator=prior,
+        factor_returns=fr,
+        groups=sc_groups,
+        linear_constraints=sc_lin,
+    )
+
+    # Combined: top ETF from factors result + singles,
+    # no sector constraints (ETF anchors market exposure;
+    # singles complement freely).
+    if barra_model:
+        _run_combined(
+            symbol, scenarios, opts, params, barra_model, prior
         )
-    else:
-        opts = run_opts(symbol, scenarios, params)
 
     baskets: dict[str, Basket] = {}
     for name, opt in opts.items():

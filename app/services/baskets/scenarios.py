@@ -11,10 +11,8 @@ from app.services.baskets.config import (
     MIN_SINGLE_MKT_CAP,
     MIN_SINGLE_REL_CAP,
 )
-from app.services.baskets.factors import EmpModel
 from app.utils.market import slice_hist
 from app.utils.groups import (
-    COMBINED,
     FACTORS,
     INDICES,
     SCENARIOS,
@@ -209,54 +207,6 @@ def _refine_by_correlation(
     return [s for s, _ in scored[:max_count]]
 
 
-def _get_emp_candidates(
-    symbol: str,
-    emp_model: EmpModel,
-    hists: pl.DataFrame,
-    target_returns: pl.DataFrame,
-    template: str,
-    refs: pl.DataFrame | None = None,
-    max_count: int = MAX_SINGLES,
-) -> list[str]:
-    """Pre-screen by factor distance, refine with corr.
-
-    Stage 1: Rank liquid stocks by factor loading distance,
-    take top PRESCREEN_MULT * max_count.
-    Stage 2: Correlation refinement via composite score.
-    """
-    target_smb = emp_model.smb.exposures.get(symbol)
-    target_tv = emp_model.turnover.exposures.get(symbol)
-    if not target_smb or not target_tv:
-        return []
-
-    liquid = _build_liquid_set(symbol, refs)
-
-    prescreen_count = max_count * PRESCREEN_MULT
-    all_dists: list[tuple[str, float]] = []
-    for s in emp_model.smb.exposures:
-        if s == symbol:
-            continue
-        if liquid is not None and s not in liquid:
-            continue
-        smb_exp = emp_model.smb.exposures[s]
-        tv_exp = emp_model.turnover.exposures.get(s)
-        if not tv_exp:
-            continue
-        dist = abs(smb_exp.loading - target_smb.loading) + abs(
-            tv_exp.loading - target_tv.loading
-        )
-        all_dists.append((s, dist))
-
-    all_dists.sort(key=lambda x: x[1])
-    prescreen = all_dists[:prescreen_count]
-    if not prescreen:
-        return []
-
-    return _refine_by_correlation(
-        prescreen, hists, target_returns, template, max_count
-    )
-
-
 def _get_barra_candidates(
     symbol: str,
     barra_model: BarraModel,
@@ -392,35 +342,11 @@ def _build_singles_wide(
     return wide if not wide.is_empty() else None
 
 
-def _best_etf_col(
-    etf_groups: list[pl.DataFrame],
-    target_returns: pl.DataFrame,
-) -> str | None:
-    """ETF column most correlated (abs) with target returns."""
-    tr = target_returns.select(['date', 'target'])
-    corrs: dict[str, float] = {}
-    for gr in etf_groups:
-        etf_cols = [c for c in gr.columns if c != 'date']
-        joined = tr.join(gr, on='date', how='inner').drop_nulls()
-        if joined.is_empty():
-            continue
-        for col in etf_cols:
-            if col not in joined.columns:
-                continue
-            c = joined.select(pl.corr('target', col)).item()
-            if c is not None:
-                corrs[col] = abs(c)
-    if not corrs:
-        return None
-    return max(corrs, key=corrs.__getitem__)
-
-
 def get_scenarios(
     symbol: str,
     hist: pl.DataFrame,
     refs: pl.DataFrame,
     hists: pl.DataFrame,
-    emp_model: EmpModel | None = None,
     barra_model: BarraModel | None = None,
     template: str = HIST_TEMPLATE_DEFAULT,
     scale: int | None = None,
@@ -428,10 +354,10 @@ def get_scenarios(
     """Build scenario return matrices for optimization.
 
     Each scenario is an independent candidate pool.
-    Singles pre-screened by Barra exposures (preferred)
-    or factor quintile proximity when available.
+    Singles pre-screened by Barra exposures when available.
 
-    Combined = single best-correlated ETF + singles.
+    Returns indices, factors, singles only.
+    Combined is built in builder.py from the factors result.
     """
     _, _, unit, default_scale, _ = HIST_TEMPLATES[template]
     if scale is None:
@@ -494,7 +420,7 @@ def get_scenarios(
         else:
             log.warning(f'scenarios: {FACTORS} unavailable')
 
-    # Singles (pre-screened by Barra or factor model)
+    # Singles (pre-screened by Barra when available)
     include = None
     if barra_model:
         include = _get_barra_candidates(
@@ -507,19 +433,6 @@ def get_scenarios(
         )
         log.info(
             f'scenarios: {SINGLES} barra pre-screen '
-            f'-> {len(include)} candidates'
-        )
-    elif emp_model:
-        include = _get_emp_candidates(
-            symbol,
-            emp_model,
-            hists,
-            target_returns,
-            template,
-            refs=refs,
-        )
-        log.info(
-            f'scenarios: {SINGLES} factor pre-screen '
             f'-> {len(include)} candidates'
         )
 
@@ -552,68 +465,25 @@ def get_scenarios(
         returns_list = [group_returns[g] for g in groups]
         returns_list.append(target_returns)
 
-        combined = pl.concat(
+        returns_df = pl.concat(
             returns_list, how='align_left'
         ).drop_nulls()
 
-        if len(combined) > MIN_HIST:
-            combined = combined.tail(MIN_HIST)
+        if len(returns_df) > MIN_HIST:
+            returns_df = returns_df.tail(MIN_HIST)
 
-        if len(combined) >= MIN_HIST:
-            scenarios[name] = combined
+        if len(returns_df) >= MIN_HIST:
+            scenarios[name] = returns_df
             log.info(
                 f'scenarios: {name} ({label}) '
-                f'cols={combined.width} '
-                f'rows={combined.height}'
+                f'cols={returns_df.width} '
+                f'rows={returns_df.height}'
             )
         else:
             log.warning(
                 f'scenarios: {name} '
-                f'{len(combined)} rows '
+                f'{len(returns_df)} rows '
                 f'< {MIN_HIST} after join'
             )
-
-    # Combined: single best-correlated ETF + singles
-    etf_avail = [
-        group_returns[g]
-        for g in (INDICES, FACTORS)
-        if g in group_returns
-    ]
-    if etf_avail and SINGLES in group_returns:
-        best = _best_etf_col(etf_avail, target_returns)
-        if best:
-            etf_col = next(
-                (
-                    gr.select(['date', best])
-                    for gr in etf_avail
-                    if best in gr.columns
-                ),
-                None,
-            )
-            if etf_col is not None:
-                returns_list = [
-                    etf_col,
-                    group_returns[SINGLES],
-                    target_returns,
-                ]
-                comb = pl.concat(
-                    returns_list, how='align_left'
-                ).drop_nulls()
-                if len(comb) > MIN_HIST:
-                    comb = comb.tail(MIN_HIST)
-                if len(comb) >= MIN_HIST:
-                    scenarios[COMBINED] = comb
-                    log.info(
-                        f'scenarios: {COMBINED} '
-                        f'etf={best} '
-                        f'cols={comb.width} '
-                        f'rows={comb.height}'
-                    )
-                else:
-                    log.warning(
-                        f'scenarios: {COMBINED} '
-                        f'{len(comb)} rows '
-                        f'< {MIN_HIST} after join'
-                    )
 
     return scenarios

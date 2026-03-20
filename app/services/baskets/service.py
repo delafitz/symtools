@@ -14,11 +14,6 @@ from app.services.baskets.builder import (
     build_baskets,
     rebuild_from_weights,
 )
-from app.services.baskets.config import (
-    MODEL_CHOICE,
-    ModelChoice,
-)
-from app.services.baskets.factors import build_emp_model
 from app.services.baskets.worker import run_batch
 from app.utils.groups import SCENARIOS
 from app.utils.logger import get_logger
@@ -30,32 +25,22 @@ BATCH_SIZE = 200
 
 
 class BasketService:
-    """Owns model, basket optimization, and basket cache.
+    """Owns Barra model, basket optimization, and basket cache.
 
     Receives refs + hists at init (read-only snapshots).
-    Builds emp or barra model based on model_choice,
-    runs batch optimization or restores from cached
-    weights on startup.
+    Builds Barra model on init, runs batch optimization or
+    restores from cached weights on startup.
     """
 
     def __init__(
         self,
         refs: pl.DataFrame,
         hists: pl.DataFrame,
-        model_choice: ModelChoice = MODEL_CHOICE,
     ) -> None:
         self.refs = refs
         self.hists = hists
-        self.model_choice = model_choice
-        self.emp_model = (
-            build_emp_model(refs, hists)
-            if model_choice == 'emp'
-            else None
-        )
-        self.barra_model: BarraModel | None = (
-            build_barra_model(refs, hists)
-            if model_choice == 'barra'
-            else None
+        self.barra_model: BarraModel | None = build_barra_model(
+            refs, hists
         )
         self.baskets: dict[str, SymbolBaskets] = {}
 
@@ -74,9 +59,7 @@ class BasketService:
             hist,
             self.refs,
             self.hists,
-            emp_model=self.emp_model,
             barra_model=self.barra_model,
-            model_choice=self.model_choice,
         )
         elapsed = perf_counter() - start
 
@@ -232,9 +215,7 @@ class BasketService:
             symbols_hists,
             self.refs,
             self.hists,
-            emp_model=self.emp_model,
             barra_model=self.barra_model,
-            model_choice=self.model_choice,
         )
 
         rows = []

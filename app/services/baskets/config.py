@@ -7,11 +7,6 @@ construction. Parameters fall into two categories:
 2. Solver settings — control optimization behavior and performance
 """
 
-from typing import Literal
-
-ModelChoice = Literal['emp', 'barra']
-MODEL_CHOICE: ModelChoice = 'barra'
-
 # =============================================================================
 # BASKET CONSTRAINTS
 # =============================================================================

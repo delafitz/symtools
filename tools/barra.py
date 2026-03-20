@@ -1,8 +1,8 @@
-"""Compare empirical vs Barra factor model optimization.
+"""Barra factor model basket optimization diagnostics.
 
 Loads refs + hists from parquet, builds the Barra model,
-then runs both EmpiricalPrior and Barra FactorModel optimizations
-side-by-side for each symbol.
+then runs basket optimization for each symbol and prints
+weights and stats for all scenarios.
 
 Usage:
     uv run python tools/barra.py AAPL
@@ -27,24 +27,22 @@ from app.services.baskets.barra import (
     get_factor_returns,
     get_prior,
 )
-from app.services.baskets.factors import (
-    build_emp_model,
+from app.services.baskets.builder import (
+    _build_combined,
+    _pick_top_etf,
 )
-from app.services.baskets.opt import run_opts
+from app.services.baskets.opt import DEFAULT_PARAMS, run_opts
 from app.services.baskets.risk import calc_stats
-from app.services.baskets.scenarios import (
-    get_scenarios,
-)
+from app.services.baskets.scenarios import get_scenarios
+from app.utils.groups import COMBINED
 from app.utils.logger import get_logger
 from app.utils.sic_gics import sic_to_sector
-from app.utils.store import get_store
 
 log = get_logger(__name__)
 
 
 def load_data() -> tuple[pl.DataFrame, pl.DataFrame] | None:
     """Load refs + hists from the most recent parquet."""
-    from pathlib import Path
 
     def latest(name: str) -> pl.DataFrame | None:
         files = sorted(Path('data').glob(f'{name}.*.parquet'))
@@ -94,19 +92,17 @@ def log_sector_dist(refs: pl.DataFrame) -> None:
     log.info(f'unmapped SIC descriptions: {unmapped}')
 
 
-def run_comparison(
+def run_barra(
     symbol: str,
     refs: pl.DataFrame,
     hists: pl.DataFrame,
     barra: BarraModel,
-    emp_model,
 ) -> None:
-    """Run empirical vs Barra for one symbol."""
+    """Run Barra basket optimization for one symbol."""
     print(f'\n{"=" * 50}')
     print(f'  {symbol.upper()}')
     print(f'{"=" * 50}')
 
-    # Log Barra exposures
     exp = barra.exposures.get(symbol)
     if exp:
         print(
@@ -122,7 +118,6 @@ def run_comparison(
     else:
         print('(no Barra exposures — not in universe)')
 
-    # Get symbol hist
     sym_hist = hists.filter(
         (pl.col('symbol') == symbol) & (pl.col('template') == 'Y')
     ).drop('symbol', 'template')
@@ -131,15 +126,7 @@ def run_comparison(
         print(f'  no Y hist for {symbol}')
         return
 
-    # Build scenarios independently for each model
-    emp_scenarios = get_scenarios(
-        symbol,
-        sym_hist,
-        refs,
-        hists,
-        emp_model=emp_model,
-    )
-    barra_scenarios = get_scenarios(
+    scenarios = get_scenarios(
         symbol,
         sym_hist,
         refs,
@@ -147,38 +134,23 @@ def run_comparison(
         barra_model=barra,
     )
 
-    if not emp_scenarios and not barra_scenarios:
+    if not scenarios:
         print(f'  no scenarios for {symbol}')
         return
 
-    # Run empirical on factor-screened scenarios
-    t0 = perf_counter()
-    emp_opts = (
-        run_opts(symbol, emp_scenarios) if emp_scenarios else {}
-    )
-    emp_time = perf_counter() - t0
-
-    # Get factor returns aligned to barra scenario dates
-    from app.services.baskets.opt import DEFAULT_PARAMS
+    prior = get_prior()
 
     all_dates: list[str] = []
-    for returns in barra_scenarios.values():
+    for returns in scenarios.values():
         all_dates.extend(returns.get_column('date').to_list())
-    unique_dates = sorted(set(all_dates))
-    fr = get_factor_returns(barra, unique_dates)
+    fr = get_factor_returns(barra, sorted(set(all_dates)))
 
-    # Build sector constraints per barra scenario
     target_sector = barra.exposures.get(
         symbol, BarraExposure(0, 0, 0, 0, 0, 0, 0)
     ).sector
     sc_groups: dict[str, dict[str, list[str]] | None] = {}
     sc_lin: dict[str, list[str] | None] = {}
-    for name, returns in barra_scenarios.items():
-        if name == 'combined':
-            sc_groups[name] = None
-            sc_lin[name] = None
-            log.info('sector constraints [combined]: none (ETF)')
-            continue
+    for name, returns in scenarios.items():
         columns = [
             c for c in returns.columns if c not in ('date', 'target')
         ]
@@ -199,93 +171,62 @@ def run_comparison(
                 f'sector constraints [{name}]: none (no sectors)'
             )
 
-    # Run Barra on barra-screened scenarios
     t0 = perf_counter()
-    barra_prior = get_prior()
-    barra_opts = (
-        run_opts(
-            symbol,
-            barra_scenarios,
-            prior_estimator=barra_prior,
-            factor_returns=fr,
-            groups=sc_groups,
-            linear_constraints=sc_lin,
-        )
-        if barra_scenarios
-        else {}
+    opts = run_opts(
+        symbol,
+        scenarios,
+        prior_estimator=prior,
+        factor_returns=fr,
+        groups=sc_groups,
+        linear_constraints=sc_lin,
     )
-    barra_time = perf_counter() - t0
+    elapsed = perf_counter() - t0
 
-    print(
-        f'\nTiming: empirical={emp_time:.2f}s barra={barra_time:.2f}s'
+    # Combined: top ETF from factors + singles, no sector constraints
+    top_etf = _pick_top_etf(
+        opts.get('factors', {}).get('weights', pl.DataFrame())
     )
+    if top_etf:
+        comb_data = _build_combined(top_etf, scenarios)
+        if comb_data is not None:
+            scenarios[COMBINED] = comb_data
+            comb_fr = get_factor_returns(
+                barra,
+                sorted(set(comb_data['date'].to_list())),
+            )
+            comb_opts = run_opts(
+                symbol,
+                {COMBINED: comb_data},
+                prior_estimator=prior,
+                factor_returns=comb_fr,
+            )
+            opts.update(comb_opts)
+            print(f'combined: etf={top_etf}')
 
-    # Compare results
-    all_scenarios = sorted(
-        set(emp_opts.keys()) | set(barra_opts.keys())
-    )
-    for name in all_scenarios:
-        emp = emp_opts.get(name)
-        bar = barra_opts.get(name)
+    print(f'Timing: {elapsed:.2f}s')
+
+    for name in sorted(opts.keys()):
+        opt = opts[name]
+        sc = scenarios.get(name)
         print(f'\n  {name}:')
 
-        header = f'{"":>20s} {"Empirical":>12s} {"Barra":>12s}'
-        print(header)
-        print(f'  {"-" * 46}')
+        if opt['weights'].is_empty():
+            print('    (no weights)')
+            continue
 
-        # Weights
-        emp_w = (
-            dict(emp['weights'].rows())
-            if emp and not emp['weights'].is_empty()
-            else {}
-        )
-        bar_w = (
-            dict(bar['weights'].rows())
-            if bar and not bar['weights'].is_empty()
-            else {}
-        )
-        all_syms = sorted(set(emp_w.keys()) | set(bar_w.keys()))
-        for s in all_syms:
-            ew = emp_w.get(s, 0)
-            bw = bar_w.get(s, 0)
-            print(f'  {s:>20s} {ew:>12.4f} {bw:>12.4f}')
-
-        # Stats comparison (each vs its own scenarios)
-        emp_sc = emp_scenarios.get(name)
-        bar_sc = barra_scenarios.get(name)
-        if (
-            emp
-            and not emp['weights'].is_empty()
-            and emp_sc is not None
-            and bar
-            and not bar['weights'].is_empty()
-            and bar_sc is not None
+        wts = dict(opt['weights'].rows())
+        for sym, w in sorted(
+            wts.items(), key=lambda x: x[1], reverse=True
         ):
-            emp_stats = calc_stats(
-                symbol,
-                emp['weights'],
-                emp_sc,
-            )['stats']
-            bar_stats = calc_stats(
-                symbol,
-                bar['weights'],
-                bar_sc,
-            )['stats']
+            print(f'  {sym:>20s}  {w:>8.4f}')
 
+        if sc is not None:
+            stats = calc_stats(symbol, opt['weights'], sc)['stats']
+            print(f'  {"corr":>20s}  {stats["corr"]:>8.4f}')
+            print(f'  {"beta":>20s}  {stats["beta"]:>8.4f}')
             print(
-                f'  {"corr":>20s} '
-                f'{emp_stats["corr"]:>12.4f} '
-                f'{bar_stats["corr"]:>12.4f}'
-            )
-            print(
-                f'  {"beta":>20s} '
-                f'{emp_stats["beta"]:>12.4f} '
-                f'{bar_stats["beta"]:>12.4f}'
-            )
-            print(
-                f'  {"vol_reduce":>20s} '
-                f'{emp_stats["vol_reduce"]:>11.1%} '
-                f'{bar_stats["vol_reduce"]:>11.1%}'
+                f'  {"vol_reduce":>20s}  '
+                f'{stats["vol_reduce"]:>7.1%}'
             )
 
 
@@ -303,11 +244,9 @@ def main() -> None:
         sys.exit(1)
     refs, hists = result
 
-    # Ensure g_sector exists
     refs = ensure_g_sector(refs)
     log_sector_dist(refs)
 
-    # Determine symbols
     if args:
         symbols = [s.lower() for s in args]
     elif top_n:
@@ -321,12 +260,6 @@ def main() -> None:
     else:
         print('usage: barra.py SYMBOL [SYMBOL...] | --top N')
         sys.exit(1)
-
-    # Build models
-    print('\n=== Building Emp Model ===')
-    t0 = perf_counter()
-    emp_model = build_emp_model(refs, hists)
-    print(f'emp model: {perf_counter() - t0:.2f}s')
 
     print('\n=== Building Barra Model ===')
     t0 = perf_counter()
@@ -344,9 +277,8 @@ def main() -> None:
     )
     print(f'sectors: {", ".join(barra.sector_names.values())}')
 
-    # Run comparisons
     for sym in symbols:
-        run_comparison(sym, refs, hists, barra, emp_model)
+        run_barra(sym, refs, hists, barra)
 
 
 if __name__ == '__main__':
