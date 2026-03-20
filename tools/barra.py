@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import polars as pl
 
+from app.models.baskets import Basket
 from app.services.baskets.barra import (
     BarraExposure,
     BarraModel,
@@ -32,6 +33,7 @@ from app.services.baskets.builder import (
     _pick_top_etf,
 )
 from app.services.baskets.opt import DEFAULT_PARAMS, run_opts
+from app.services.baskets.report import build_report
 from app.services.baskets.risk import calc_stats
 from app.services.baskets.scenarios import get_scenarios
 from app.utils.groups import COMBINED
@@ -205,29 +207,20 @@ def run_barra(
 
     print(f'Timing: {elapsed:.2f}s')
 
-    for name in sorted(opts.keys()):
-        opt = opts[name]
+    # Build basket models for the report
+    baskets: dict[str, Basket] = {}
+    for name, opt in opts.items():
         sc = scenarios.get(name)
-        print(f'\n  {name}:')
-
-        if opt['weights'].is_empty():
-            print('    (no weights)')
+        if opt['weights'].is_empty() or sc is None:
             continue
+        raw = {
+            'params': opt['params'],
+            **calc_stats(symbol, opt['weights'], sc),
+        }
+        baskets[name] = Basket.model_validate(raw)
 
-        wts = dict(opt['weights'].rows())
-        for sym, w in sorted(
-            wts.items(), key=lambda x: x[1], reverse=True
-        ):
-            print(f'  {sym:>20s}  {w:>8.4f}')
-
-        if sc is not None:
-            stats = calc_stats(symbol, opt['weights'], sc)['stats']
-            print(f'  {"corr":>20s}  {stats["corr"]:>8.4f}')
-            print(f'  {"beta":>20s}  {stats["beta"]:>8.4f}')
-            print(
-                f'  {"vol_reduce":>20s}  '
-                f'{stats["vol_reduce"]:>7.1%}'
-            )
+    report = build_report(symbol, barra, opts, baskets, sc_lin)
+    print(f'\n{report}')
 
 
 def main() -> None:
