@@ -1,3 +1,52 @@
+"""Basket construction pipeline.
+
+## Full opt flow
+
+  1. get_scenarios() — builds return matrices for each static scenario
+     (indices, factors, singles) using Barra candidate pre-screening
+     and the cached ETF hists. Combined is registered in SCENARIOS but
+     has no static groups, so get_scenarios() skips it.
+
+  2. Barra prior + factor returns — get_prior() returns a skfolio
+     FactorModel (B'FB + D covariance). get_factor_returns() slices
+     the Barra model's pre-computed factor returns to the union of
+     dates across all scenario return matrices.
+
+  3. Sector constraints — build_sector_constraints() produces skfolio
+     groups + linear_constraints for each scenario that has stock
+     symbols with known Barra sector memberships:
+       - floor: target sector >= SECTOR_FLOOR_PCT × max_budget
+       - cap:   each off-sector  <= SECTOR_CAP_PCT  × max_budget
+     indices/factors have no sector labels so get no constraints.
+     combined is intentionally unconstrained (see step 5).
+
+  4. run_opts() — runs the two-stage SCIP optimizer (see opt.py) for
+     indices, factors, and singles simultaneously.
+
+  5. _run_combined() — two-pass combined scenario:
+       a. _pick_top_etf(): reads the factors weights from step 4,
+          filters to ETF symbols, returns the highest-weight one.
+          This is the model-selected liquid hedge anchor.
+       b. _build_combined(): slices that ETF's return column from
+          scenarios['factors'] and concatenates with scenarios['singles']
+          to form the combined candidate pool.
+       c. Runs a separate Barra opt on combined with no sector
+          constraints — the ETF already anchors market/sector exposure;
+          singles complement freely.
+       d. Updates scenarios[COMBINED] and opts in-place.
+
+  6. Basket assembly — for each opt result with non-empty weights,
+     calc_stats() computes beta, corr, vol_reduce against the scenario
+     returns. Basket.model_validate() wraps the result.
+
+## Startup cache path
+
+  rebuild_from_weights() bypasses steps 1–5. It reconstructs basket
+  stats from persisted weights (loaded from baskets.parquet) without
+  re-running SCIP, by joining hedge symbol hists and calling calc_stats
+  directly. Works for all scenarios including combined.
+"""
+
 from __future__ import annotations
 
 import polars as pl

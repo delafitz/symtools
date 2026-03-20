@@ -1,3 +1,55 @@
+"""Basket optimization — two-stage MIP solver.
+
+## Overview
+
+Each scenario (indices, factors, singles, combined) is optimized
+independently via `run_opts`, which calls `run_opt` per scenario.
+
+## Two-stage strategy
+
+Large candidate pools (> STAGE2_MIN_COLS) use a two-stage approach:
+
+  Stage 1 — CLARABEL continuous relaxation (EmpiricalPrior, fast):
+    Solves the unconstrained problem to get approximate weights.
+    Takes the top STAGE1_TOPN candidates by absolute weight.
+    Filters sector groups/constraints to surviving columns.
+
+  Stage 2 — SCIP mixed-integer program (Barra FactorModel prior):
+    Enforces cardinality (max N non-zero weights), threshold_long
+    (min weight for inclusion), and sector floor/cap constraints.
+    Time-limited to SOLVER_TIME_LIMIT seconds.
+
+Small pools (≤ STAGE2_MIN_COLS) skip stage 1 and go direct to SCIP.
+
+## Inputs (run_opt)
+
+  X               — wide returns DataFrame: date dropped, columns are
+                    hedge candidates + 'target' (the stock being hedged)
+  prior_estimator — skfolio BasePrior; FactorModel (Barra B'FB+D) for
+                    indices/factors/singles/combined; falls back to
+                    EmpiricalPrior if None
+  factor_returns  — aligned factor return series for FactorModel prior
+  groups          — skfolio sector group map: symbol → group label,
+                    used to enforce sector floor/cap constraints
+  linear_constraints — skfolio constraint strings, e.g.
+                    'sector_11 >= 0.12', 'sector_7 <= 0.10'
+
+## Output (run_opt)
+
+  weights DataFrame: columns [<target_symbol>, 'weight'],
+  rows are hedge instruments with weight > MIN_WEIGHT, sorted
+  descending. The target column name is the symbol string (e.g.
+  'aapl') — this is the skfolio transpose convention.
+
+## Scenario constraints summary
+
+  indices   — no sector constraints (only 3 ETFs, no sector labels)
+  factors   — no sector constraints (ETFs have no sector membership)
+  singles   — sector floor on target sector, caps on off-sectors
+  combined  — no sector constraints (ETF anchors exposure; singles
+               complement freely)
+"""
+
 import warnings
 from time import perf_counter
 
@@ -37,6 +89,7 @@ def run_opt(
     groups: dict[str, list[str]] | None = None,
     linear_constraints: list[str] | None = None,
 ):
+    """Optimize one scenario. See module docstring for full details."""
     start = perf_counter()
     cols = X.shape[1]
 
