@@ -10,9 +10,20 @@ from app.models.baskets import Basket
 from app.services.baskets.barra import BarraModel
 from app.utils.groups import get_all_etf_symbols
 
+_CFG = dict(tbl_rows=-1, tbl_width_chars=100, float_precision=3)
+
 
 def _section(lines: list[str], title: str) -> None:
     lines.append(f'--- {title} ---')
+
+
+def _df_str(df: pl.DataFrame) -> str:
+    """Format DataFrame as string, drop the shape header line."""
+    with pl.Config(**_CFG):
+        raw = str(df)
+    return '\n'.join(
+        ln for ln in raw.splitlines() if not ln.startswith('shape:')
+    )
 
 
 def _add_barra(
@@ -25,25 +36,23 @@ def _add_barra(
     exp = barra_model.exposures.get(symbol)
     if not exp:
         return
-    _section(lines, 'Barra Exposures')
-    lines.append(
-        f'  size:     {exp.size:+.3f}   '
-        f'momentum: {exp.momentum:+.3f}'
-    )
-    lines.append(
-        f'  reversal: {exp.reversal:+.3f}   '
-        f'beta:     {exp.beta:+.3f}'
-    )
-    lines.append(
-        f'  resvol:   {exp.resvol:+.3f}   '
-        f'liquidity:{exp.liquidity:+.3f}'
-    )
     sname = (
         barra_model.sector_names.get(exp.sector, str(exp.sector))
         if exp.sector
         else 'none'
     )
-    lines.append(f'  sector:   {exp.sector} ({sname})')
+    _section(lines, f'Barra Exposures  sector={exp.sector} ({sname})')
+    df = pl.DataFrame({
+        'factor': [
+            'size', 'momentum', 'reversal',
+            'beta', 'resvol', 'liquidity',
+        ],
+        'value': [
+            exp.size, exp.momentum, exp.reversal,
+            exp.beta, exp.resvol, exp.liquidity,
+        ],
+    })
+    lines.append(_df_str(df))
     lines.append('')
 
 
@@ -75,29 +84,29 @@ def _add_pools(
         days = opt['days']
         d0 = opt['date_start']
         d1 = opt['date_end']
+        pre_ranked = rankings.get(name)
+        label = 'barra ranked' if pre_ranked else 'corr ranked'
         lines.append(
-            f'  {name:<10} {cands:>3} cands, '
-            f'{days} bars  ({d0} to {d1})'
+            f'  [{name}] {cands} cands, '
+            f'{days} bars  ({d0} to {d1})  [{label}]'
         )
         returns = scenarios.get(name)
         if returns is None:
             continue
-        pre_ranked = rankings.get(name)
         if pre_ranked is not None:
-            # Barra-ranked: show factor dist + corr
             top = pre_ranked[:10]
-            row = '  '.join(
-                f'{s}:{fd:.2f}/{c:+.2f}'
-                for s, fd, c in top
-            )
+            df = pl.DataFrame({
+                'symbol': [s for s, _, _ in top],
+                'fd': [fd for _, fd, _ in top],
+                'corr': [c for _, _, c in top],
+            })
         else:
-            # No pre-ranking — sort by corr
             top_corr = _candidate_corrs(returns)[:10]
-            row = '  '.join(
-                f'{s}:{c:+.2f}' for s, c in top_corr
-            )
-        if row:
-            lines.append(f'    top: {row}')
+            df = pl.DataFrame({
+                'symbol': [s for s, _ in top_corr],
+                'corr': [c for _, c in top_corr],
+            })
+        lines.append(_df_str(df))
     lines.append('')
 
 
@@ -140,20 +149,18 @@ def _add_opt_results(
     for name, opt in opts.items():
         weights: pl.DataFrame = opt['weights']
         cands = opt['population'] - 1
+        lines.append(f'  [{name}] {cands} cands')
         if weights.is_empty():
-            lines.append(f'  [{name:<10}] no result')
+            lines.append('    no result')
             continue
         sym_col = weights.columns[0]
-        wt_pairs = list(zip(
-            weights[sym_col].to_list(),
-            weights['weight'].to_list(),
-        ))
-        wt_str = '  '.join(
-            f'{s}:{w:.1%}' for s, w in wt_pairs
-        )
-        lines.append(
-            f'  [{name:<10}] {cands} cands -> {wt_str}'
-        )
+        df = pl.DataFrame({
+            'symbol': weights[sym_col].to_list(),
+            'weight': [
+                f'{w:.1%}' for w in weights['weight'].to_list()
+            ],
+        })
+        lines.append(_df_str(df))
     lines.append('')
 
 
@@ -164,19 +171,13 @@ def _add_stats(
     if not baskets:
         return
     _section(lines, 'Basket Stats')
-    hdr = (
-        f'  {"scenario":<12} '
-        f'{"corr":>6} {"beta":>7} {"vol_red":>8}'
-    )
-    lines.append(hdr)
-    for name, b in baskets.items():
-        s = b.stats
-        lines.append(
-            f'  {name:<12} '
-            f'{s.corr:>6.3f} '
-            f'{s.beta:>7.3f} '
-            f'{s.vol_reduce:>8.3f}'
-        )
+    df = pl.DataFrame({
+        'scenario': list(baskets.keys()),
+        'corr': [b.stats.corr for b in baskets.values()],
+        'beta': [b.stats.beta for b in baskets.values()],
+        'vol_red': [b.stats.vol_reduce for b in baskets.values()],
+    })
+    lines.append(_df_str(df))
     lines.append('')
 
 
@@ -186,7 +187,6 @@ def _add_summary(
     opts: dict,
 ) -> None:
     _section(lines, 'Summary')
-    # Warnings
     for name, opt in opts.items():
         if opt['weights'].is_empty():
             lines.append(f'  WARN: {name} produced no weights')
@@ -198,7 +198,6 @@ def _add_summary(
     if not baskets:
         lines.append('  no baskets produced')
         return
-    # Best by corr
     best_name, best = max(
         baskets.items(), key=lambda x: x[1].stats.corr
     )
@@ -207,7 +206,6 @@ def _add_summary(
         f'corr={best.stats.corr:.3f}  '
         f'vol_red={best.stats.vol_reduce:.3f}'
     )
-    # ETF anchor from combined
     if 'combined' in baskets:
         etf_syms = set(get_all_etf_symbols())
         comb_wts = baskets['combined'].weights
