@@ -70,7 +70,9 @@ class BasketService:
         self.reports[symbol] = report
         log.info(report)
 
-        result = SymbolBaskets(symbol=symbol, baskets=baskets_dict)
+        result = SymbolBaskets(
+            symbol=symbol, baskets=baskets_dict, report=report
+        )
         self.baskets[symbol] = result
         self._save_weights()
         self._save_reports()
@@ -182,6 +184,7 @@ class BasketService:
                 self.baskets[symbol] = SymbolBaskets(
                     symbol=symbol,
                     baskets=baskets,
+                    report=self.reports.get(symbol),
                 )
                 count += 1
 
@@ -229,6 +232,7 @@ class BasketService:
             self.baskets[symbol] = SymbolBaskets(
                 symbol=symbol,
                 baskets=baskets,
+                report=report,
             )
             rows.extend(self._summary_rows(symbol, baskets, elapsed))
 

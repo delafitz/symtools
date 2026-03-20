@@ -55,7 +55,6 @@ _SNAPSHOT_EVENTS = {
     'analytics': '#/components/schemas/SymbolAnalytics',
     'cost': '#/components/schemas/SymbolCostCalcs',
     'baskets': '#/components/schemas/SymbolBaskets',
-    'basket_report': '#/components/schemas/BasketReport',
     'basket_hist': '#/components/schemas/BasketHist',
     'alerts': '#/components/schemas/SymbolAlerts',
     'done': None,

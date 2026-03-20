@@ -468,11 +468,6 @@ class Cache:
             return None
         return self.basket_svc.get(symbol)
 
-    def get_basket_report(self, symbol: str) -> str | None:
-        if self.basket_svc is None:
-            return None
-        return self.basket_svc.get_report(symbol)
-
     async def get_costs(
         self, overrides: SymbolOverrides
     ) -> SymbolCostCalcs | None:
