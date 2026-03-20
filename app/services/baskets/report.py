@@ -78,7 +78,7 @@ def _add_pools(
     scenarios: dict[str, pl.DataFrame],
     rankings: dict[str, list[tuple[str, float, float]]],
 ) -> None:
-    _section(lines, 'Candidate Pools')
+    _section(lines, 'Candidate Pools + Results')
     for name, opt in opts.items():
         cands = opt['population'] - 1
         days = opt['days']
@@ -95,18 +95,29 @@ def _add_pools(
             continue
         if pre_ranked is not None:
             top = pre_ranked[:10]
-            df = pl.DataFrame({
+            pool_df = pl.DataFrame({
                 'symbol': [s for s, _, _ in top],
                 'fd': [fd for _, fd, _ in top],
                 'corr': [c for _, _, c in top],
             })
         else:
             top_corr = _candidate_corrs(returns)[:10]
-            df = pl.DataFrame({
+            pool_df = pl.DataFrame({
                 'symbol': [s for s, _ in top_corr],
                 'corr': [c for _, c in top_corr],
             })
-        lines.append(_df_str(df))
+        weights: pl.DataFrame = opt['weights']
+        if not weights.is_empty():
+            sym_col = weights.columns[0]
+            wt_df = pl.DataFrame({
+                'symbol': weights[sym_col].to_list(),
+                'weight': [
+                    f'{w:.1%}'
+                    for w in weights['weight'].to_list()
+                ],
+            })
+            pool_df = pool_df.join(wt_df, on='symbol', how='left')
+        lines.append(_df_str(pool_df))
     lines.append('')
 
 
@@ -140,28 +151,6 @@ def _add_constraints(
                 lines.append(f'    {lc}')
     lines.append('')
 
-
-def _add_opt_results(
-    lines: list[str],
-    opts: dict,
-) -> None:
-    _section(lines, 'Opt Results')
-    for name, opt in opts.items():
-        weights: pl.DataFrame = opt['weights']
-        cands = opt['population'] - 1
-        lines.append(f'  [{name}] {cands} cands')
-        if weights.is_empty():
-            lines.append('    no result')
-            continue
-        sym_col = weights.columns[0]
-        df = pl.DataFrame({
-            'symbol': weights[sym_col].to_list(),
-            'weight': [
-                f'{w:.1%}' for w in weights['weight'].to_list()
-            ],
-        })
-        lines.append(_df_str(df))
-    lines.append('')
 
 
 def _add_stats(
@@ -239,7 +228,6 @@ def build_report(
     _add_barra(lines, symbol, barra_model)
     _add_pools(lines, opts, scenarios, rankings)
     _add_constraints(lines, sc_lin, barra_model)
-    _add_opt_results(lines, opts)
     _add_stats(lines, baskets)
     _add_summary(lines, baskets, opts)
     return '\n'.join(lines)
