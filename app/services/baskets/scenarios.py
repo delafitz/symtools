@@ -350,13 +350,15 @@ def get_scenarios(
     barra_model: BarraModel | None = None,
     template: str = HIST_TEMPLATE_DEFAULT,
     scale: int | None = None,
-) -> dict[str, pl.DataFrame]:
+) -> tuple[dict[str, pl.DataFrame], dict[str, list[str]]]:
     """Build scenario return matrices for optimization.
 
     Each scenario is an independent candidate pool.
     Singles pre-screened by Barra exposures when available.
 
-    Returns indices, factors, singles only.
+    Returns (scenarios, rankings) where rankings maps scenario
+    name -> ordered candidate list for scenarios with a
+    pre-existing ranking (currently only singles).
     Combined is built in builder.py from the factors result.
     """
     _, _, unit, default_scale, _ = HIST_TEMPLATES[template]
@@ -375,7 +377,7 @@ def get_scenarios(
             f'{len(symbol_hist)} bars '
             f'< {MIN_HIST} required'
         )
-        return {}
+        return {}, {}
 
     target_returns = get_returns(symbol_hist)
 
@@ -488,4 +490,8 @@ def get_scenarios(
                 f'< {MIN_HIST} after join'
             )
 
-    return scenarios
+    rankings: dict[str, list[str]] = {}
+    if include and SINGLES in scenarios:
+        rankings[SINGLES] = include
+
+    return scenarios, rankings

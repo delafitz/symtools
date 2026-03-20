@@ -128,7 +128,7 @@ def run_barra(
         print(f'  no Y hist for {symbol}')
         return
 
-    scenarios = get_scenarios(
+    scenarios, rankings = get_scenarios(
         symbol,
         sym_hist,
         refs,
@@ -220,7 +220,7 @@ def run_barra(
         baskets[name] = Basket.model_validate(raw)
 
     report = build_report(
-        symbol, barra, scenarios, opts, baskets, sc_lin
+        symbol, barra, scenarios, rankings, opts, baskets, sc_lin
     )
     print(f'\n{report}')
 

@@ -181,7 +181,7 @@ def build_baskets(
     barra_model: BarraModel | None = None,
 ) -> tuple[dict[str, Basket], str] | None:
     """Build basket optimizations for a symbol."""
-    scenarios = get_scenarios(
+    scenarios, rankings = get_scenarios(
         symbol,
         hist,
         refs,
@@ -259,7 +259,7 @@ def build_baskets(
         baskets[name] = Basket.model_validate(raw)
 
     report = build_report(
-        symbol, barra_model, scenarios, opts, baskets, sc_lin
+        symbol, barra_model, scenarios, rankings, opts, baskets, sc_lin
     )
     return (baskets, report) if baskets else None
 

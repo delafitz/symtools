@@ -67,6 +67,7 @@ def _add_pools(
     lines: list[str],
     opts: dict,
     scenarios: dict[str, pl.DataFrame],
+    rankings: dict[str, list[str]],
 ) -> None:
     _section(lines, 'Candidate Pools')
     for name, opt in opts.items():
@@ -79,14 +80,26 @@ def _add_pools(
             f'{days} bars  ({d0} to {d1})'
         )
         returns = scenarios.get(name)
-        if returns is not None:
-            corrs = _candidate_corrs(returns)
-            top = corrs[:10]
-            if top:
-                row = '  '.join(
-                    f'{s}:{c:+.2f}' for s, c in top
-                )
-                lines.append(f'    top: {row}')
+        if returns is None:
+            continue
+        # Compute corr for all candidates (used for display values)
+        corr_map = dict(_candidate_corrs(returns))
+        pre_ranked = rankings.get(name)
+        if pre_ranked is not None:
+            # Use pre-existing Barra composite ranking, show corr values
+            top = [
+                (s, corr_map[s])
+                for s in pre_ranked[:10]
+                if s in corr_map
+            ]
+        else:
+            # No pre-ranking — sort by corr
+            top = sorted(
+                corr_map.items(), key=lambda x: x[1], reverse=True
+            )[:10]
+        if top:
+            row = '  '.join(f'{s}:{c:+.2f}' for s, c in top)
+            lines.append(f'    top: {row}')
     lines.append('')
 
 
@@ -217,6 +230,7 @@ def build_report(
     symbol: str,
     barra_model: BarraModel | None,
     scenarios: dict[str, pl.DataFrame],
+    rankings: dict[str, list[str]],
     opts: dict,
     baskets: dict[str, Basket],
     sc_lin: dict[str, list[str] | None],
@@ -227,7 +241,7 @@ def build_report(
     lines.append(f'=== {symbol.upper()} OPT REPORT {today} ===')
     lines.append('')
     _add_barra(lines, symbol, barra_model)
-    _add_pools(lines, opts, scenarios)
+    _add_pools(lines, opts, scenarios, rankings)
     _add_constraints(lines, sc_lin, barra_model)
     _add_opt_results(lines, opts)
     _add_stats(lines, baskets)
