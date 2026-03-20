@@ -42,6 +42,7 @@ class BasketService:
             refs, hists
         )
         self.baskets: dict[str, SymbolBaskets] = {}
+        self.reports: dict[str, str] = {}
 
     def startup(self) -> None:
         self._load_cached()
@@ -53,7 +54,7 @@ class BasketService:
             return None
 
         start = perf_counter()
-        baskets = build_baskets(
+        build_result = build_baskets(
             symbol,
             hist,
             self.refs,
@@ -62,17 +63,25 @@ class BasketService:
         )
         elapsed = perf_counter() - start
 
-        if not baskets:
+        if not build_result:
             return None
 
-        result = SymbolBaskets(symbol=symbol, baskets=baskets)
+        baskets_dict, report = build_result
+        self.reports[symbol] = report
+        log.info(report)
+
+        result = SymbolBaskets(symbol=symbol, baskets=baskets_dict)
         self.baskets[symbol] = result
         self._save_weights()
-        self._log_summary(symbol, baskets, elapsed)
+        self._save_reports()
+        self._log_summary(symbol, baskets_dict, elapsed)
         return result
 
     def get(self, symbol: str) -> SymbolBaskets | None:
         return self.baskets.get(symbol)
+
+    def get_report(self, symbol: str) -> str | None:
+        return self.reports.get(symbol)
 
     # -- private ---------------------------------------------------
 
@@ -154,6 +163,12 @@ class BasketService:
                 weights_map[sym][sc] = {}
             weights_map[sym][sc][row['hedge_symbol']] = row['weight']
 
+        # Load cached reports
+        cached_reports = get_store('basket_reports')
+        if cached_reports is not None:
+            for row in cached_reports.iter_rows(named=True):
+                self.reports[row['symbol']] = row['report']
+
         count = 0
         for symbol, scenarios in weights_map.items():
             hist = self._get_hist(symbol)
@@ -209,7 +224,8 @@ class BasketService:
             if not result:
                 continue
 
-            baskets, elapsed = result
+            baskets, report, elapsed = result
+            self.reports[symbol] = report
             self.baskets[symbol] = SymbolBaskets(
                 symbol=symbol,
                 baskets=baskets,
@@ -231,6 +247,7 @@ class BasketService:
                 )
 
         self._save_weights()
+        self._save_reports()
 
     def _save_weights(self) -> None:
         rows: list[dict] = []
@@ -248,3 +265,13 @@ class BasketService:
         if rows:
             write_store(pl.DataFrame(rows), 'baskets')
             log.info(f'saved {len(rows)} basket weights')
+
+    def _save_reports(self) -> None:
+        if not self.reports:
+            return
+        rows = [
+            {'symbol': sym, 'report': rep}
+            for sym, rep in self.reports.items()
+        ]
+        write_store(pl.DataFrame(rows), 'basket_reports')
+        log.info(f'saved {len(rows)} basket reports')

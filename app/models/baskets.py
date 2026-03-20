@@ -38,3 +38,9 @@ class SymbolBaskets(BaseModel):
     model_config = config()
     symbol: str = f(Fmt.symbol)
     baskets: dict[str, Basket]
+
+
+class BasketReport(BaseModel):
+    model_config = config()
+    symbol: str = f(Fmt.symbol)
+    report: str

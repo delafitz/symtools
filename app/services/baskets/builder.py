@@ -61,6 +61,7 @@ from app.services.baskets.barra import (
     get_prior,
 )
 from app.services.baskets.opt import DEFAULT_PARAMS, run_opts
+from app.services.baskets.report import build_report
 from app.services.baskets.risk import calc_stats
 from app.services.baskets.scenarios import (
     MIN_HIST,
@@ -178,7 +179,7 @@ def build_baskets(
     hists: pl.DataFrame,
     params: dict[str, BasketParams] | None = None,
     barra_model: BarraModel | None = None,
-) -> dict[str, Basket] | None:
+) -> tuple[dict[str, Basket], str] | None:
     """Build basket optimizations for a symbol."""
     scenarios = get_scenarios(
         symbol,
@@ -256,7 +257,11 @@ def build_baskets(
             ),
         }
         baskets[name] = Basket.model_validate(raw)
-    return baskets if baskets else None
+
+    report = build_report(
+        symbol, barra_model, opts, baskets, sc_lin
+    )
+    return (baskets, report) if baskets else None
 
 
 def rebuild_from_weights(

@@ -39,20 +39,20 @@ def _init_worker(
 
 def _build_one(
     args: tuple[str, bytes],
-) -> tuple[str, dict | None, float]:
+) -> tuple[str, tuple | None, float]:
     """Runs per symbol in worker process."""
     symbol, hist_ipc = args
     start = perf_counter()
     try:
         hist = pl.read_ipc(BytesIO(hist_ipc))
-        baskets = build_baskets(
+        result = build_baskets(
             symbol,
             hist,
             _w_refs,
             _w_hists,
             barra_model=_w_barra,
         )
-        return symbol, baskets, perf_counter() - start
+        return symbol, result, perf_counter() - start
     except Exception:
         import traceback
 
@@ -65,7 +65,7 @@ def run_batch(
     refs: pl.DataFrame,
     hists: pl.DataFrame,
     barra_model=None,
-) -> dict[str, tuple[dict, float]]:
+) -> dict[str, tuple[dict, str, float]]:
     """Write shared data to temp IPC, run pool.
 
     Returns dict of symbol -> (baskets, elapsed).
@@ -87,7 +87,7 @@ def run_batch(
             hist.write_ipc(buf)
             items.append((sym, buf.getvalue()))
 
-        results: dict[str, tuple[dict, float]] = {}
+        results: dict[str, tuple[dict, str, float]] = {}
         with ProcessPoolExecutor(
             initializer=_init_worker,
             initargs=(
@@ -103,10 +103,12 @@ def run_batch(
             for future in as_completed(futures):
                 sym = futures[future]
                 try:
-                    _, baskets, elapsed = future.result()
-                    if baskets:
+                    _, result, elapsed = future.result()
+                    if result:
+                        baskets, report = result
                         results[sym] = (
                             baskets,
+                            report,
                             elapsed,
                         )
                 except Exception as e:

@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, AsyncGenerator
 
 from pydantic import BaseModel
 
+from app.models.baskets import BasketReport
 from app.models.inputs import SymbolOverrides
 from app.services.cost import calc_costs
 from app.services.hist import build_basket_hists
@@ -88,6 +89,12 @@ async def stream_symbol(
         baskets = await asyncio.to_thread(basket_svc.build, symbol)
     if baskets:
         yield ('baskets', baskets)
+        report_str = cache.get_basket_report(symbol)
+        if report_str:
+            yield (
+                'basket_report',
+                BasketReport(symbol=symbol, report=report_str),
+            )
 
     # Collect basket syms once
     basket_syms: set[str] = set()
