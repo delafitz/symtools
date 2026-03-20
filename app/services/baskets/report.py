@@ -47,9 +47,26 @@ def _add_barra(
     lines.append('')
 
 
+def _candidate_corrs(
+    returns: pl.DataFrame,
+) -> list[tuple[str, float]]:
+    """Correlation of each candidate with target, sorted desc."""
+    candidates = [
+        c for c in returns.columns if c not in ('date', 'target')
+    ]
+    corrs: list[tuple[str, float]] = []
+    for c in candidates:
+        val = returns.select(pl.corr(c, 'target')).item()
+        if val is not None:
+            corrs.append((c, val))
+    corrs.sort(key=lambda x: x[1], reverse=True)
+    return corrs
+
+
 def _add_pools(
     lines: list[str],
     opts: dict,
+    scenarios: dict[str, pl.DataFrame],
 ) -> None:
     _section(lines, 'Candidate Pools')
     for name, opt in opts.items():
@@ -61,6 +78,15 @@ def _add_pools(
             f'  {name:<10} {cands:>3} cands, '
             f'{days} bars  ({d0} to {d1})'
         )
+        returns = scenarios.get(name)
+        if returns is not None:
+            corrs = _candidate_corrs(returns)
+            top = corrs[:10]
+            if top:
+                row = '  '.join(
+                    f'{s}:{c:+.2f}' for s, c in top
+                )
+                lines.append(f'    top: {row}')
     lines.append('')
 
 
@@ -190,6 +216,7 @@ def _add_summary(
 def build_report(
     symbol: str,
     barra_model: BarraModel | None,
+    scenarios: dict[str, pl.DataFrame],
     opts: dict,
     baskets: dict[str, Basket],
     sc_lin: dict[str, list[str] | None],
@@ -200,7 +227,7 @@ def build_report(
     lines.append(f'=== {symbol.upper()} OPT REPORT {today} ===')
     lines.append('')
     _add_barra(lines, symbol, barra_model)
-    _add_pools(lines, opts)
+    _add_pools(lines, opts, scenarios)
     _add_constraints(lines, sc_lin, barra_model)
     _add_opt_results(lines, opts)
     _add_stats(lines, baskets)

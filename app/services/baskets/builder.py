@@ -259,7 +259,7 @@ def build_baskets(
         baskets[name] = Basket.model_validate(raw)
 
     report = build_report(
-        symbol, barra_model, opts, baskets, sc_lin
+        symbol, barra_model, scenarios, opts, baskets, sc_lin
     )
     return (baskets, report) if baskets else None
 

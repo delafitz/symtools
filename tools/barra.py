@@ -219,7 +219,9 @@ def run_barra(
         }
         baskets[name] = Basket.model_validate(raw)
 
-    report = build_report(symbol, barra, opts, baskets, sc_lin)
+    report = build_report(
+        symbol, barra, scenarios, opts, baskets, sc_lin
+    )
     print(f'\n{report}')
 
 
