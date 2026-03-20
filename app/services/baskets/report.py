@@ -67,7 +67,7 @@ def _add_pools(
     lines: list[str],
     opts: dict,
     scenarios: dict[str, pl.DataFrame],
-    rankings: dict[str, list[str]],
+    rankings: dict[str, list[tuple[str, float, float]]],
 ) -> None:
     _section(lines, 'Candidate Pools')
     for name, opt in opts.items():
@@ -82,23 +82,21 @@ def _add_pools(
         returns = scenarios.get(name)
         if returns is None:
             continue
-        # Compute corr for all candidates (used for display values)
-        corr_map = dict(_candidate_corrs(returns))
         pre_ranked = rankings.get(name)
         if pre_ranked is not None:
-            # Use pre-existing Barra composite ranking, show corr values
-            top = [
-                (s, corr_map[s])
-                for s in pre_ranked[:10]
-                if s in corr_map
-            ]
+            # Barra-ranked: show factor dist + corr
+            top = pre_ranked[:10]
+            row = '  '.join(
+                f'{s}:{fd:.2f}/{c:+.2f}'
+                for s, fd, c in top
+            )
         else:
             # No pre-ranking — sort by corr
-            top = sorted(
-                corr_map.items(), key=lambda x: x[1], reverse=True
-            )[:10]
-        if top:
-            row = '  '.join(f'{s}:{c:+.2f}' for s, c in top)
+            top_corr = _candidate_corrs(returns)[:10]
+            row = '  '.join(
+                f'{s}:{c:+.2f}' for s, c in top_corr
+            )
+        if row:
             lines.append(f'    top: {row}')
     lines.append('')
 
@@ -230,7 +228,7 @@ def build_report(
     symbol: str,
     barra_model: BarraModel | None,
     scenarios: dict[str, pl.DataFrame],
-    rankings: dict[str, list[str]],
+    rankings: dict[str, list[tuple[str, float, float]]],
     opts: dict,
     baskets: dict[str, Basket],
     sc_lin: dict[str, list[str] | None],

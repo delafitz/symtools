@@ -144,12 +144,13 @@ def _refine_by_correlation(
     target_returns: pl.DataFrame,
     template: str,
     max_count: int,
-) -> list[str]:
+) -> list[tuple[str, float, float]]:
     """Stage 2: correlation refinement + composite score.
 
     Takes pre-screened (symbol, distance) pairs sorted by
     distance, computes correlation with target returns,
-    and returns top max_count by composite score.
+    and returns top max_count by composite score as
+    (symbol, factor_dist, corr) tuples.
     """
     prescreen_syms = [s for s, _ in prescreen]
     factor_dists = {s: d for s, d in prescreen}
@@ -163,7 +164,10 @@ def _refine_by_correlation(
         & (pl.col('template') == template)
     )
     if cand_hists.is_empty():
-        return prescreen_syms[:max_count]
+        return [
+            (s, factor_dists[s], float('nan'))
+            for s in prescreen_syms[:max_count]
+        ]
 
     wide = cand_hists.pivot(
         on='symbol',
@@ -204,7 +208,10 @@ def _refine_by_correlation(
         scored.append((s, score))
 
     scored.sort(key=lambda x: x[1])
-    return [s for s, _ in scored[:max_count]]
+    return [
+        (s, factor_dists[s], corrs.get(s, float('nan')))
+        for s, _ in scored[:max_count]
+    ]
 
 
 def _get_barra_candidates(
@@ -215,7 +222,7 @@ def _get_barra_candidates(
     template: str,
     refs: pl.DataFrame | None = None,
     max_count: int = MAX_SINGLES,
-) -> list[str]:
+) -> list[tuple[str, float, float]]:
     """Pre-screen by Barra exposure distance.
 
     Stage 1: L1 norm over 6 z-scored style factors,
@@ -350,7 +357,7 @@ def get_scenarios(
     barra_model: BarraModel | None = None,
     template: str = HIST_TEMPLATE_DEFAULT,
     scale: int | None = None,
-) -> tuple[dict[str, pl.DataFrame], dict[str, list[str]]]:
+) -> tuple[dict[str, pl.DataFrame], dict[str, list[tuple[str, float, float]]]]:
     """Build scenario return matrices for optimization.
 
     Each scenario is an independent candidate pool.
@@ -423,7 +430,7 @@ def get_scenarios(
             log.warning(f'scenarios: {FACTORS} unavailable')
 
     # Singles (pre-screened by Barra when available)
-    include = None
+    include: list[tuple[str, float, float]] | None = None
     if barra_model:
         include = _get_barra_candidates(
             symbol,
@@ -438,6 +445,9 @@ def get_scenarios(
             f'-> {len(include)} candidates'
         )
 
+    include_syms = (
+        [s for s, _, _ in include] if include else None
+    )
     singles_wide = _build_singles_wide(
         hists,
         refs,
@@ -445,7 +455,7 @@ def get_scenarios(
         unit,
         scale,
         exclude_symbol=symbol,
-        include_symbols=include,
+        include_symbols=include_syms,
     )
     if singles_wide is not None and len(singles_wide) >= MIN_HIST:
         n_syms = singles_wide.width - 1
@@ -490,7 +500,7 @@ def get_scenarios(
                 f'< {MIN_HIST} after join'
             )
 
-    rankings: dict[str, list[str]] = {}
+    rankings: dict[str, list[tuple[str, float, float]]] = {}
     if include and SINGLES in scenarios:
         rankings[SINGLES] = include
 
