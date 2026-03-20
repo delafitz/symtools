@@ -7,7 +7,6 @@ import polars as pl
 from app.models.baskets import SymbolBaskets
 from app.services.prices import HIST_TEMPLATES
 from app.utils.market import slice_hist
-from app.utils.groups import SCENARIOS
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -112,9 +111,7 @@ def compute_tracking_for_template(
             f'missing closes for {missing_syms}'
         )
 
-    for name, (_label, _groups) in SCENARIOS.items():
-        if name not in basket_data:
-            continue
+    for name in basket_data:
         weights = basket_data[name].weights
         if not weights:
             continue

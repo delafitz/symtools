@@ -15,7 +15,6 @@ from app.services.baskets.builder import (
     rebuild_from_weights,
 )
 from app.services.baskets.worker import run_batch
-from app.utils.groups import SCENARIOS
 from app.utils.logger import get_logger
 from app.utils.store import get_store, write_store
 
@@ -85,23 +84,9 @@ class BasketService:
     ) -> list[dict]:
         rows: list[dict] = []
         first = True
-        for name, (label, _) in SCENARIOS.items():
-            b = baskets.get(name)
+        for name, b in baskets.items():
             secs = round(elapsed, 1) if first else None
             first = False
-            if not b:
-                rows.append(
-                    {
-                        'symbol': symbol.upper(),
-                        'scenario': name,
-                        'weights': '',
-                        'corr': None,
-                        'beta': None,
-                        'vol_red': None,
-                        'secs': secs,
-                    }
-                )
-                continue
             wt_str = ' '.join(
                 f'{s}:{w:.0%}'
                 for s, w in sorted(
