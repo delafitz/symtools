@@ -457,6 +457,8 @@ def get_scenarios(
     # Build indices / factors / singles scenarios
     scenarios: dict[str, pl.DataFrame] = {}
     for name, (label, groups) in SCENARIOS.items():
+        if not groups:
+            continue  # built dynamically elsewhere (e.g. combined)
         missing = [g for g in groups if g not in group_returns]
         if missing:
             log.debug(f'scenarios: {name} missing {missing}')

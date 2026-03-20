@@ -21,12 +21,14 @@ COMBINED = 'combined'
 
 # Scenario definitions: name -> (label, groups)
 # Groups are filtered from unified hists by type.
-# 'combined' is built separately in scenarios.py
-# (best-correlated ETF + singles).
+# 'combined' has no static groups — it is built dynamically
+# in builder.py (top-weight ETF from factors opt + singles).
+# get_scenarios() skips it because its groups list is empty.
 SCENARIOS = {
     'indices': ('Indices', [INDICES]),
     'factors': ('Factors', [FACTORS]),
     'singles': ('Singles', [SINGLES]),
+    'combined': ('Combined', []),
 }
 
 
