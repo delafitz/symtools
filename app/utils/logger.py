@@ -45,6 +45,12 @@ class Logger(logging.Logger):
             kwargs['extra'] = {'color': 'cyan'}
             self._log(logging.INFO, msg, args, **kwargs)
 
+    def green(self, msg: str, *args, **kwargs) -> None:
+        """Log with green text."""
+        if self.isEnabledFor(logging.INFO):
+            kwargs['extra'] = {'color': 'green'}
+            self._log(logging.INFO, msg, args, **kwargs)
+
     def yellow(self, msg: str, *args, **kwargs) -> None:
         """Log with yellow text."""
         if self.isEnabledFor(logging.INFO):

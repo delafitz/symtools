@@ -20,6 +20,7 @@ from app.services.hist import (
     load_symbol_template,
 )
 from app.services.prices import HIST_TEMPLATE_DEFAULT
+from app.services.block_trades import load_block_trades
 from app.services.refs import (
     get_cached_refs,
     get_cached_hists,
@@ -50,6 +51,7 @@ class Cache:
         self.tickers: pl.DataFrame | None = None
         self.symbols: Trie | None = None
         self.analytics: dict[str, SymbolAnalytics] = {}
+        self.block_trades: pl.DataFrame | None = None
         self.basket_svc: BasketService | None = None
         self._refs_task: asyncio.Task | None = None
         self._loading_symbols: set[str] = set()
@@ -177,6 +179,12 @@ class Cache:
             )
             log.yellow(f'startup summary:\n{summary}')
 
+    def _load_block_trades(self) -> None:
+        """Load block trades file and cross-check against refs."""
+        if self.refs is None:
+            return
+        self.block_trades = load_block_trades(self.refs)
+
     def _init_baskets(self) -> None:
         """Create basket service, pre-build analytics."""
         if self.refs is None or self.hists is None:
@@ -208,6 +216,7 @@ class Cache:
             self.symbols = Trie(cached_refs.get_column(SYM).to_list())
             self._log_refs_summary('cached')
             log.info(f'hists (cached): {len(cached_hists)} rows')
+            self._load_block_trades()
             self._init_baskets()
             return
 
@@ -236,6 +245,7 @@ class Cache:
             on_hists_update,
         )
         self._log_refs_summary('loaded', **stats)
+        self._load_block_trades()
         self._init_baskets()
 
     def is_ready(self) -> bool:
