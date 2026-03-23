@@ -28,7 +28,13 @@ Small pools (≤ STAGE2_MIN_COLS) skip stage 1 and go direct to SCIP.
   prior_estimator — skfolio BasePrior; FactorModel (Barra B'FB+D) for
                     indices/factors/singles/combined; falls back to
                     EmpiricalPrior if None
-  factor_returns  — aligned factor return series for FactorModel prior
+  factor_returns  — factor return series for FactorModel prior.
+                    MUST be row-aligned to X (same dates, same order).
+                    run_opts accepts a dict[scenario, DataFrame] and
+                    slices per-scenario to guarantee alignment — passing
+                    a single shared DataFrame across scenarios causes a
+                    sklearn shape mismatch when scenarios have different
+                    date ranges (e.g. short-history targets).
   groups          — skfolio sector group map: symbol → group label,
                     used to enforce sector floor/cap constraints
   linear_constraints — skfolio constraint strings, e.g.
@@ -221,13 +227,18 @@ def run_opts(
 
     for name, returns in scenarios.items():
         scenario_params = params.get(name, DEFAULT_PARAMS)
+        sc_fr = (
+            factor_returns.get(name)
+            if isinstance(factor_returns, dict)
+            else factor_returns
+        )
         weights = run_opt(
             symbol,
             name,
             returns.drop('date'),
             scenario_params,
             prior_estimator=prior_estimator,
-            factor_returns=factor_returns,
+            factor_returns=sc_fr,
             groups=groups.get(name),
             linear_constraints=linear_constraints.get(name),
         )

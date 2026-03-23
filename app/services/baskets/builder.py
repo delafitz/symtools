@@ -195,10 +195,15 @@ def build_baskets(
 
     prior = get_prior()
 
-    all_dates: list[str] = []
-    for returns in scenarios.values():
-        all_dates.extend(returns.get_column('date').to_list())
-    fr = get_factor_returns(barra_model, sorted(set(all_dates)))
+    fr: dict[str, pl.DataFrame] | None = None
+    if barra_model:
+        fr = {
+            name: get_factor_returns(
+                barra_model,
+                returns.get_column('date').to_list(),
+            )
+            for name, returns in scenarios.items()
+        }
 
     target_sector = barra_model.exposures.get(
         symbol,
