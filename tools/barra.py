@@ -142,10 +142,12 @@ def run_barra(
 
     prior = get_prior()
 
-    all_dates: list[str] = []
-    for returns in scenarios.values():
-        all_dates.extend(returns.get_column('date').to_list())
-    fr = get_factor_returns(barra, sorted(set(all_dates)))
+    fr = {
+        name: get_factor_returns(
+            barra, returns.get_column('date').to_list()
+        )
+        for name, returns in scenarios.items()
+    }
 
     target_sector = barra.exposures.get(
         symbol, BarraExposure(0, 0, 0, 0, 0, 0, 0)
