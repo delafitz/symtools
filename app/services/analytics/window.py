@@ -18,9 +18,9 @@ def get_stats_for_window(
             .item()
         )
         stats['meta'] = (
-            1e2 * (shift_value - base) / base
+            1e2 * (base - shift_value) / shift_value
             if units == 'pct'
-            else shift_value - base
+            else base - shift_value
         )
     return stats
 
