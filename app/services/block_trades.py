@@ -4,11 +4,24 @@ from pathlib import Path
 
 import polars as pl
 
+from app.models.blocks import BlockTrade, SymbolBlocks
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
 
 _STORE = Path('./data')
+
+# Raw column name → normalized name
+_COL_MAP = {
+    'PxDt': 'price_date',
+    'TradeDt': 'trade_date',
+    'Type': 'registered',
+    'OfferPx': 'offer_price',
+    'Shares': 'shares',
+    'Disc': 'discount',
+    'T+1': 'perf_t1',
+    'LeftBank': 'broker',
+}
 
 
 def load_block_trades(
@@ -17,8 +30,9 @@ def load_block_trades(
     """Find and load latest block_trades file from data/.
 
     Supports .json and .csv (auto-detected by extension).
-    Normalizes symbol to lowercase, cross-checks against refs —
-    logs warnings for unknown symbols and drops them.
+    Normalizes column names, symbol to lowercase,
+    cross-checks against refs — logs warnings for unknown
+    symbols and drops them.
     """
     candidates = sorted(
         list(_STORE.glob('block_trades*.json'))
@@ -52,10 +66,19 @@ def load_block_trades(
         )
         return None
 
+    # Rename known columns
+    rename = {k: v for k, v in _COL_MAP.items() if k in df.columns}
+    if rename:
+        df = df.rename(rename)
+
     # Normalize symbol to lowercase
-    df = df.with_columns(
-        pl.col('symbol').str.to_lowercase()
-    )
+    # registered: "Reg" → True, else False
+    exprs: list = [pl.col('symbol').str.to_lowercase()]
+    if 'registered' in df.columns:
+        exprs.append(
+            (pl.col('registered') == 'Reg').alias('registered')
+        )
+    df = df.with_columns(exprs)
 
     # Cross-check against refs
     known = set(refs.get_column('symbol').to_list())
@@ -82,3 +105,34 @@ def load_block_trades(
     )
     log.green(f'block_trades head:\n{df.head()}')
     return df
+
+
+def get_symbol_blocks(
+    symbol: str,
+    df: pl.DataFrame,
+) -> SymbolBlocks | None:
+    """Filter block trades for a symbol and build SymbolBlocks."""
+    rows = df.filter(pl.col('symbol') == symbol)
+    if rows.is_empty():
+        return None
+
+    trades: list[BlockTrade] = []
+    for row in rows.to_dicts():
+        offer_price = row.get('offer_price') or 0.0
+        shares = row.get('shares') or 0
+        trades.append(
+            BlockTrade(
+                symbol=symbol,
+                price_date=row.get('price_date') or '',
+                trade_date=row.get('trade_date') or '',
+                registered=row.get('registered') or False,
+                seller=row.get('seller'),
+                deal_size=offer_price * shares,
+                shares=shares,
+                offer_price=offer_price,
+                discount=row.get('discount') or 0.0,
+                perf_t1=row.get('perf_t1') or 0.0,
+                broker=row.get('broker') or '',
+            )
+        )
+    return SymbolBlocks(symbol=symbol, trades=trades)

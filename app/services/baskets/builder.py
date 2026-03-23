@@ -65,6 +65,7 @@ from app.services.baskets.report import build_report
 from app.services.baskets.risk import calc_stats
 from app.services.baskets.scenarios import (
     MIN_HIST,
+    MIN_TARGET_HIST,
     get_returns,
     get_scenarios,
 )
@@ -124,7 +125,7 @@ def _build_combined(
 
     if len(comb) > MIN_HIST:
         comb = comb.tail(MIN_HIST)
-    return comb if len(comb) >= MIN_HIST else None
+    return comb if len(comb) >= MIN_TARGET_HIST else None
 
 
 def _run_combined(
@@ -282,7 +283,7 @@ def rebuild_from_weights(
         .select(['date', 'close'])
         .rename({'close': 'target'})
     )
-    if len(symbol_hist) < MIN_HIST:
+    if len(symbol_hist) < MIN_TARGET_HIST:
         return None
     target_returns = get_returns(symbol_hist)
 
@@ -316,7 +317,7 @@ def rebuild_from_weights(
             how='align_left',
         ).drop_nulls()
 
-        if len(combined) < MIN_HIST:
+        if len(combined) < MIN_TARGET_HIST:
             continue
         combined = combined.tail(MIN_HIST)
 

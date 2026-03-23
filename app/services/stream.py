@@ -71,7 +71,12 @@ async def stream_symbol(
     if analytics:
         yield ('analytics', analytics)
 
-    # 4. Cost (1 ADV default)
+    # 4. Block trades (sync filter from cache)
+    blocks = cache.get_block_trades(symbol)
+    if blocks:
+        yield ('blocks', blocks)
+
+    # 5. Cost (1 ADV default)
     if analytics and analytics.adv > 0:
         overrides = SymbolOverrides(
             symbol=symbol,
@@ -81,7 +86,7 @@ async def stream_symbol(
         if cost:
             yield ('cost', cost)
 
-    # 5. Baskets (cached or on-demand)
+    # 6. Baskets (cached or on-demand)
     basket_svc = cache.basket_svc
     baskets = cache.get_baskets(symbol)
     if not baskets and basket_svc:

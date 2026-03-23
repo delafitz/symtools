@@ -29,8 +29,10 @@ log = get_logger(__name__)
 # Indices/factors returns are identical for all target symbols
 _etf_returns_cache: dict[tuple[str, str, int], pl.DataFrame] = {}
 
-# Minimum history length for optimizer input
+# Minimum history length for optimizer input (candidate pool)
 MIN_HIST = 250
+# Minimum history for the target symbol itself
+MIN_TARGET_HIST = 60
 # Max singles to include after pre-screen
 MAX_SINGLES = 30
 # Pre-screen multiplier (factor distance pool before corr)
@@ -378,11 +380,11 @@ def get_scenarios(
         .rename({'close': 'target'})
     )
 
-    if len(symbol_hist) < MIN_HIST:
+    if len(symbol_hist) < MIN_TARGET_HIST:
         log.warning(
             f'scenarios: {symbol} has '
             f'{len(symbol_hist)} bars '
-            f'< {MIN_HIST} required'
+            f'< {MIN_TARGET_HIST} required'
         )
         return {}, {}
 
@@ -486,7 +488,7 @@ def get_scenarios(
         if len(returns_df) > MIN_HIST:
             returns_df = returns_df.tail(MIN_HIST)
 
-        if len(returns_df) >= MIN_HIST:
+        if len(returns_df) >= MIN_TARGET_HIST:
             scenarios[name] = returns_df
             log.info(
                 f'scenarios: {name} ({label}) '

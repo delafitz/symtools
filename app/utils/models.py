@@ -37,6 +37,10 @@ class Fmt(str, Enum):
         },
     )
     date = ('date', {'type': 'date'})
+    trade_dt = (
+        'trade_dt',
+        {'type': 'date', 'format': 'dd-mmm-yy'},
+    )
     iso = ('iso', {'type': 'timestamp'})
     meta = ('meta', {'type': 'number', 'precision': 1, 'signed': True})
     delta = (
@@ -116,6 +120,15 @@ class Fmt(str, Enum):
         {'type': 'number', 'precision': 1, 'zero_dash': True},
     )
     weight = ('weight', {'type': 'number', 'precision': 2})
+    deal_size = (
+        'deal_size',
+        {
+            'type': 'number',
+            'precision': 0,
+            'prefix': '$',
+            'compact': True,
+        },
+    )
 
 
 def f(

@@ -20,7 +20,11 @@ from app.services.hist import (
     load_symbol_template,
 )
 from app.services.prices import HIST_TEMPLATE_DEFAULT
-from app.services.block_trades import load_block_trades
+from app.models.blocks import SymbolBlocks
+from app.services.block_trades import (
+    load_block_trades,
+    get_symbol_blocks,
+)
 from app.services.refs import (
     get_cached_refs,
     get_cached_hists,
@@ -471,6 +475,13 @@ class Cache:
         )
         self.analytics[symbol] = analytics
         return analytics
+
+    def get_block_trades(
+        self, symbol: str
+    ) -> SymbolBlocks | None:
+        if self.block_trades is None:
+            return None
+        return get_symbol_blocks(symbol, self.block_trades)
 
     def get_baskets(self, symbol: str) -> SymbolBaskets | None:
         """Get baskets if cached."""

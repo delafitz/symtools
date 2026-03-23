@@ -6,13 +6,14 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute
 
 from app.models.alerts import SymbolAlerts
+from app.models.blocks import SymbolBlocks
 from app.models.hist import BasketHist
 from app.server.cache import Cache
 from app.server.router import router
 
 # SSE-only models that need to appear in OpenAPI components
 # but have no dedicated REST endpoint.
-_SSE_MODELS = [BasketHist, SymbolAlerts]
+_SSE_MODELS = [BasketHist, SymbolAlerts, SymbolBlocks]
 
 
 @asynccontextmanager
