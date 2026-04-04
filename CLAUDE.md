@@ -35,7 +35,7 @@ Symtools is a FastAPI-based financial analytics server providing portfolio optim
 
 - `app/main.py` - FastAPI application entry point
 - `app/server/` - HTTP layer (router.py endpoints, cache.py in-memory storage)
-- `app/services/` - Business logic (prices, quotes, refs, hist, cost, baskets/, alerts/)
+- `app/services/` - Business logic (prices, quotes, refs, hist, cost, baskets/, alerts/, signals/, block_trades)
 - `app/models/` - Pydantic request/response models
 - `app/mds/` - Market data provider layer (see MDS Provider Architecture below)
   - `provider.py` - `MarketDataProvider` Protocol (abstract contract)
@@ -43,12 +43,14 @@ Symtools is a FastAPI-based financial analytics server providing portfolio optim
   - `polygon/` - Polygon.io provider (`massive` RESTClient)
   - `bloomberg/` - Bloomberg provider stub (`blpapi`)
 - `app/utils/` - Helpers (store.py for parquet caching, trie.py for symbol search, groups.py for ETF lists and scenario defs)
-- `data/` - Parquet cache files (date-stamped: `*.YYYYMMDD.parquet`)
+- `app/services/signals/` - Signal generators (volume estimator)
+- `data/` - Parquet cache files (date-stamped: `*.YYYYMMDD.parquet`) and block trade files
+- `tools/` - Offline CLI tools (barra.py, opt.py, prices.py)
 
 ### Core Data Flow
 
 1. **Startup** - Async loading with concurrency pool (see Startup Architecture below)
-2. **Symbol snapshot** (`/snapshot`) - SSE stream via `stream_symbol()`. Fires quote, PriceService, and analytics in parallel; yields cold Y/M hists (with synthetic today bar), then loops per-template: re-yields Y/M with real today bar, fetches stale W/D basket-sym hists, yields basket_hists. See `docs/snapshot-sse.md`.
+2. **Symbol snapshot** (`/snapshot`) - SSE stream via `stream_symbol()`. Fires quote, PriceService, and analytics in parallel; yields cold Y/M hists (with synthetic today bar), then loops per-template: re-yields Y/M with real today bar, fetches stale W/D basket-sym hists, yields basket_hists. Yields block trades early if available. See `docs/snapshot-sse.md`.
 3. **Hedge optimization** - Uses scikit-folio MeanRisk optimizer with SCIP solver against four scenario sets:
    - `indices`: SPY, QQQ, IWM
    - `factors`: sector/factor ETFs (XLK, XLF, SOXX, etc.)
@@ -61,6 +63,7 @@ On startup, the server loads reference data and pre-fetches historical data usin
 
 **Cached Startup** (refs parquet exists):
 - Load refs from `data/refs.YYYYMMDD.parquet`
+- Load block trades from `data/block_trades*.{json,csv}` (if present)
 - Load basket hists from cache
 - Background task loads any missing baskets
 
@@ -150,6 +153,7 @@ All provider methods are **sync**. Callers wrap in `asyncio.to_thread()` for asy
   - `refs.YYYYMMDD.parquet` - Reference data (symbol, name, mkt_cap, free_float, etc.)
   - `hists.YYYYMMDD.parquet` - Unified symbol hists with `symbol`/`template` columns
   - `baskets.YYYYMMDD.parquet` - Cached optimizer weights (symbol, scenario, hedge_symbol, weight)
+- **Block trade files** - `data/block_trades*.{json,csv}` — loaded at startup, not date-stamped
 - **Async services** - All endpoint handlers are async; services return Pydantic models or Polars DataFrames
 
 ### API Endpoints
@@ -157,7 +161,7 @@ All provider methods are **sync**. Callers wrap in `asyncio.to_thread()` for asy
 All routes defined in `app/server/router.py`:
 - `/search` - Symbol prefix search via Trie
 - `/refs` - Security reference data (symbol, exch, name, curr, sic, shares_out, mkt_cap, free_float, free_float_pct, free_float_date, short_interest, days_to_cover, short_avg_vol, short_interest_date)
-- `/snapshot` - SSE: streams quote, hist (Y/M/W/D), analytics, baskets, basket_hist, alerts. See `docs/snapshot-sse.md`.
+- `/snapshot` - SSE: streams quote, hist (Y/M/W/D), analytics, baskets, basket_hist, blocks, alerts. See `docs/snapshot-sse.md`.
 - `/quote` - Real-time quote (with session fields for pre/post/closed)
 - `/hist` - Historical OHLCV bars with per-scale stats
 - `/baskets` - Cached basket optimizations
@@ -174,13 +178,18 @@ All routes defined in `app/server/router.py`:
 
 #### Model Strategy (`app/services/baskets/config.py`)
 
-Two factor models for candidate screening and covariance estimation, toggled by `ModelChoice` (`'emp'` | `'barra'`) in `config.py`. `BasketService` reads `MODEL_CHOICE` at init and only builds the selected model. See `docs/MODELS.md` for full details.
+Barra structured multi-factor model (`BarraModel` in `barra.py`). 7 style factors + sector factors from Q5-Q1 factor-mimicking portfolios. Sector IDs are integers throughout. Optimizer uses skfolio `FactorModel` prior (B'FB + D covariance) with sector floor/cap constraints.
 
-**Empirical** (`'emp'`, default) — PCA-based (`EmpModel` in `factors.py`). Two factors (SMB + turnover) from principal components. Candidate screen: L1 distance on factor loadings, refined by correlation. Optimizer uses skfolio `EmpiricalPrior` (default).
+**Candidate pre-screening** (two-stage, `scenarios.py:_get_barra_candidates`):
+1. **Stage 1**: L1 norm over 6 z-scored style factors (size, momentum, reversal, beta, resvol, liquidity). Restricted to liquid stocks (absolute floor `MIN_SINGLE_MKT_CAP` = $1B, relative floor `MIN_SINGLE_REL_CAP` = 10% of target cap). Same-sector bonus (`SECTOR_BONUS` = 0.5) subtracted from distance. Pool size = `MAX_SINGLES` × `PRESCREEN_MULT` (30 × 3 = 90).
+2. **Stage 2**: Correlation refinement with composite scoring (`FACTOR_WEIGHT` = 0.7, `CORR_WEIGHT` = 0.3). Returns top `MAX_SINGLES` (30) candidates as `(symbol, factor_dist, corr)` tuples.
 
-**Barra** (`'barra'`) — Structured multi-factor (`BarraModel` in `barra.py`). 7 style factors + sector factors from Q5-Q1 factor-mimicking portfolios. Candidate screen: L1 distance on 6 z-scored style exposures with same-sector bonus. Optimizer uses skfolio `FactorModel` prior (B'FB + D covariance) with sector floor/cap constraints.
+**Sector constraints** (`barra.py:build_sector_constraints`):
+- Floor: target sector >= `SECTOR_FLOOR_PCT` (0.60) × `max_budget`
+- Cap: each off-sector <= `SECTOR_CAP_PCT` (0.50) × `max_budget`
+- Applied to indices, factors, singles scenarios. Combined is intentionally unconstrained.
 
-**Pipeline**: `BasketService` → `build_baskets(model_choice)` → `get_scenarios(emp_model=... | barra_model=...)` → `run_opts(...)` with model-specific prior/constraints → `calc_stats()`.
+**Pipeline**: `BasketService` → `build_baskets(barra_model=...)` → `get_scenarios(barra_model=...)` → `run_opts(...)` with Barra prior/constraints → `_run_combined()` → `calc_stats()` → `build_report()`.
 
 **Basket stats** (`calc_stats()` in `app/services/baskets/risk.py` → `Basket` model):
 - `weights`: hedge symbol → weight (from optimizer)
@@ -190,7 +199,22 @@ Two factor models for candidate screening and covariance estimation, toggled by 
 
 `calc_stats()` returns a dict; `Basket.model_validate()` wraps it in `builder.py`. `series` (cumulative basket returns) is consumed by tracking, not serialized in the model.
 
-**Comparison tool**: `tools/barra.py` runs both models side-by-side (`uv run python tools/barra.py AAPL`).
+**Combined scenario** (`builder.py:_run_combined`):
+1. `_pick_top_etf()` reads factors weights, returns highest-weight ETF (model-selected liquid hedge anchor)
+2. `_build_combined()` concatenates that ETF's returns with singles candidates
+3. Runs separate Barra opt with no sector constraints — ETF anchors market/sector exposure; singles complement freely
+4. Updates `scenarios[COMBINED]` and `opts` in-place
+
+**Opt report** (`report.py:build_report`): Human-readable summary generated after each build. Sections: Barra exposures, candidate pools with top 10 + factor distances + correlations + weights, sector constraints (with sector name resolution), basket stats table, summary with best scenario and anchor ETF identification. Report is returned alongside baskets and stored in `SymbolBaskets.report`.
+
+**History thresholds** (`scenarios.py`):
+- `MIN_TARGET_HIST` = 60 (minimum bars for target symbol to get baskets)
+- `MIN_HIST` = 250 (minimum bars for optimizer candidate pool)
+
+**CLI tools**:
+- `tools/barra.py` — runs Barra model for a symbol (`uv run python tools/barra.py AAPL`)
+- `tools/opt.py` — offline basket optimization from cached parquet (`uv run python tools/opt.py AAPL` or `--top 5` for top N by mkt_cap)
+- `tools/prices.py` — fetch recent daily closes (`uv run python tools/prices.py 3 AAPL SPY`)
 
 ### QuoteService (`app/services/quotes.py`)
 
@@ -312,6 +336,33 @@ Close resolution: `day.close > prev_day.close`
 
 **Timestamp Alignment**: Intraday timestamps rounded to bar boundaries (`round_ts` in `app/utils/dates.py`) for consistent joins across symbols.
 
+### Block Trades (`app/services/block_trades.py`)
+
+Loads block trade history from `data/` directory (auto-detects `.json` or `.csv`). Normalizes column names (`PxDt`→`price_date`, `TradeDt`→`trade_date`, `Type`→`registered`, etc.), lowercases symbols, cross-checks against refs (drops unknown symbols with warning).
+
+- `load_block_trades(refs)` → `pl.DataFrame | None` — called at startup (cached + fresh), stored in `cache.block_trades`
+- `get_symbol_blocks(symbol, df)` → `SymbolBlocks | None` — filters for a symbol, computes `deal_size` = `offer_price × shares`
+
+**Models** (`app/models/blocks.py`):
+- `BlockTrade` — individual trade (symbol, price_date, trade_date, registered, seller, deal_size, shares, offer_price, discount, perf_t1, broker)
+- `SymbolBlocks` — container with symbol + list of `BlockTrade`
+
+**SSE integration**: Yielded as `blocks` event early in the snapshot stream.
+
+### Volume Estimator (`app/services/signals/volume.py`)
+
+Projects today's daily volume from intraday 10-min bars (D template, 9 prior trading days). Accounts for lit/dark pool ratio — Polygon aggs only report lit-exchange volume; daily bars include dark pool prints.
+
+- `estimate_volume(symbol, intraday, daily)` → `VolumeEstimate | None`
+- Builds per-bucket average volume curve across regular trading hours (9:30–16:10 ET, 40 buckets)
+- Computes per-symbol median lit/dark ratio from historical days
+- Before 9:40 ET → `(0, 0)`: not enough signal
+- 9:40–16:10 ET → lerped curve projection with `pct_of_avg` scaling
+- After 16:10 ET → actuals, no extrapolation
+
+**Model** (`app/models/signals.py`):
+- `VolumeEstimate` — symbol, `pct_of_avg`, `projected_volume`, `lit_ratio`
+
 ### Alerts Service (`app/services/alerts/`)
 
 Rule-based signals evaluated from symbol data. Decorator-based registry: `@rule(category)` auto-registers functions `(AlertContext) -> Alert | None`. `evaluate(ctx, categories?)` runs all (or filtered) rules, returns `SymbolAlerts | None`.
@@ -333,6 +384,7 @@ Rule-based signals evaluated from symbol data. Decorator-based registry: `@rule(
 **Cache** (`app/server/cache.py`):
 - `quote_svc: QuoteService` — TTL-cached quote fetching, initialized on `Cache.__init__`
 - `get_quote(symbol)` — delegates to `quote_svc.get(symbol)`
+- `block_trades: pl.DataFrame | None` — loaded at startup via `load_block_trades(refs)`, queried per-symbol via `get_block_trades(symbol)` → `SymbolBlocks | None`
 - Unified hists: `self.hists` — single Polars DataFrame with `symbol`/`template` columns, all templates concatenated
 - `get_hist(symbol, template)` — sync, filters unified hists, drops metadata columns
 - `get_hist_async(symbol, template)` — async, fetches from API if not cached or stale, adds to unified hists
@@ -361,6 +413,8 @@ Services return Pydantic models directly — no `model_validate` at call sites:
 - `cache.get_quote()` → `SymbolQuote` (delegates to QuoteService)
 - `cache.get_costs()` → `SymbolCostCalcs | None`
 - `cache.get_baskets()` → `SymbolBaskets | None`
+- `cache.get_block_trades()` → `SymbolBlocks | None`
+- `estimate_volume()` → `VolumeEstimate | None`
 - `evaluate()` → `SymbolAlerts | None`
 
 The basket pipeline passes `SymbolBaskets`/`Basket` models end-to-end (builder → service → cache → stream → tracking). `calc_stats()` in `baskets/risk.py` returns a dict internally; `Basket.model_validate()` happens in `builder.py`.
