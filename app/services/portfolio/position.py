@@ -24,6 +24,12 @@ import polars as pl
 
 DEFAULT_HEDGE_RATIO = 0.85
 DEFAULT_STOP_PCT = -0.08
+# Round-trip transaction cost per side (bps). Charged on
+# target entry, target exit, hedge entry, hedge exit — so the
+# total round-trip cost is 4 × bps × notional. 10 bps/side
+# captures realistic basket/block execution (spread, slippage,
+# small borrow drag).
+DEFAULT_COST_BPS = 10.0
 RAMP_DAYS = 3
 
 
@@ -45,15 +51,20 @@ class PositionResult:
     basket_entry_px: float
     exit_date: str  # the LAST day a piece was sold
 
-    # P&L (USD)
+    # P&L (USD) — net of transaction costs
     target_pnl_usd: float
     hedge_pnl_usd: float
     pnl_unhedged_usd: float
     pnl_hedged_usd: float
 
-    # Returns (P&L / notional)
+    # Returns (net P&L / notional)
     return_unhedged: float
     return_hedged: float
+
+    # Transaction cost diagnostics
+    cost_bps_per_side: float
+    cost_target_usd: float
+    cost_hedge_usd: float
 
     # Stop diagnostics
     stop_triggered: bool
@@ -103,6 +114,7 @@ def score_position(
     window_d: int,
     hedge_ratio: float = DEFAULT_HEDGE_RATIO,
     stop_pct: float = DEFAULT_STOP_PCT,
+    cost_bps_per_side: float = DEFAULT_COST_BPS,
 ) -> PositionResult | None:
     """Score one trade at one tradeout horizon.
 
@@ -111,6 +123,11 @@ def score_position(
     is the synthetic weighted-basket close series (see
     backtest.py:basket_close_series). Returns None if any
     required price is missing.
+
+    `cost_bps_per_side` charges a transaction cost on each of
+    the four execution sides (target entry, target exit, hedge
+    entry, hedge exit). With the default 10 bps/side the total
+    round-trip drag is 40 bps × gross_notional.
     """
     if notional_usd <= 0 or offer_price <= 0:
         return None
@@ -197,10 +214,19 @@ def score_position(
     avg_b_exit = sum(exit_basket_pxs) / len(exit_basket_pxs)
     exit_date = exit_dates[-1]
 
-    # P&L
-    target_pnl = shares * (avg_t_exit - offer_price)
+    # P&L — gross
+    target_pnl_gross = shares * (avg_t_exit - offer_price)
     basket_ret = avg_b_exit / basket_entry - 1
-    hedge_pnl = -hedge_notional * basket_ret
+    hedge_pnl_gross = -hedge_notional * basket_ret
+
+    # Transaction costs: bps × 2 sides × notional per leg
+    cost_frac = cost_bps_per_side / 10000.0
+    cost_target = notional_usd * 2 * cost_frac
+    cost_hedge = hedge_notional * 2 * cost_frac
+
+    # Net of costs
+    target_pnl = target_pnl_gross - cost_target
+    hedge_pnl = hedge_pnl_gross - cost_hedge
     pnl_unhedged = target_pnl
     pnl_hedged = target_pnl + hedge_pnl
 
@@ -224,6 +250,9 @@ def score_position(
         pnl_hedged_usd=pnl_hedged,
         return_unhedged=pnl_unhedged / notional_usd,
         return_hedged=pnl_hedged / notional_usd,
+        cost_bps_per_side=cost_bps_per_side,
+        cost_target_usd=cost_target,
+        cost_hedge_usd=cost_hedge,
         stop_triggered=stop_triggered,
         stop_day=stop_day,
     )

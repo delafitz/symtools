@@ -9,7 +9,8 @@ baseline portfolio backtest. Builds on
 
 Population: 327 hedgeable trades from the alt dataset, 20d
 window. Sizing: pct_adv=0.15, floor=$10M, cap=$100M, hedge
-ratio=0.85, stop=−8%.
+ratio=0.85, stop=−8%, cost=10 bps × 4 sides (40 bps
+round-trip on gross). All P&L numbers are **net of costs**.
 
 Per-trade rules return a multiplier in `[0.0, 1.5]` applied
 to the base notional:
@@ -34,23 +35,23 @@ multiplier; pct fields are invariant. Implementation in
 | `skip_high_xadv` | 0.0× if shares_pct_adv > 5.0 | larger trades vs ADV correlate with continued selling pressure |
 | `chase_d10` | 1.5× if pre_20d > +5% AND pre_1d > −2% | decile lens: D10 archetype outperforms by ~20pp at 20d |
 
-## Sweep results (window=20d)
+## Sweep results (window=20d, net of 10 bps × 4 sides costs)
 
 | strategy | n | avg_GMV | avg_VaR | **PnL_mo** | mo_ret | **ann_ret** | **sharpe_h** |
 |---|---|---|---|---|---|---|---|
-| baseline | 327 | $436M | $37M | +$6M | +1.48% | +17.7% | +1.92 |
-| half_bad_bank | 327 | $330M | $29M | +$5M | +1.62% | +19.4% | +1.84 |
-| skip_bad_bank | 156 | $228M | $21M | +$5M | +1.88% | +22.6% | +1.59 |
-| skip_panic | 278 | $406M | $33M | +$6M | +1.65% | +19.8% | **+2.06** |
-| skip_deep_disc | 287 | $388M | $31M | +$3M | +1.16% | +13.9% | +1.69 |
-| skip_high_xadv | 206 | $352M | $31M | +$6M | +1.51% | +18.1% | +1.66 |
-| chase_d10 | 327 | $499M | $43M | **+$8M** | +1.71% | +20.5% | +1.98 |
-| half_bank+skip_panic | 278 | $307M | $25M | +$5M | +1.83% | +21.9% | +2.01 |
-| **chase_d10+skip_panic** | **278** | **$471M** | **$39M** | **+$8M** | **+1.87%** | **+22.4%** | **+2.08** |
-| chase_d10+half_bad_bank | 327 | $377M | $33M | +$7M | +1.83% | +22.0% | +1.88 |
-| **chase_d10+half_bank+skip_panic** | **278** | **$355M** | **$30M** | **+$7M** | **+2.03%** | **+24.4%** | **+2.03** |
-| chase_d10+skip_bad_bank | 156 | $258M | $24M | +$6M | +2.05% | +24.6% | +1.62 |
-| all_skips | 73 | $176M | $14M | +$3M | +1.63% | +19.6% | +1.24 |
+| baseline | 327 | $436M | $37M | +$5M | +1.21% | +14.5% | +1.61 |
+| half_bad_bank | 327 | $330M | $29M | +$4M | +1.36% | +16.3% | +1.57 |
+| skip_bad_bank | 156 | $228M | $21M | +$4M | +1.62% | +19.4% | +1.39 |
+| skip_panic | 278 | $406M | $33M | +$5M | +1.39% | +16.6% | **+1.77** |
+| skip_deep_disc | 287 | $388M | $31M | +$3M | +0.89% | +10.7% | +1.34 |
+| skip_high_xadv | 206 | $352M | $31M | +$5M | +1.25% | +15.0% | +1.40 |
+| chase_d10 | 327 | $499M | $43M | **+$7M** | +1.44% | +17.3% | +1.71 |
+| half_bank+skip_panic | 278 | $307M | $25M | +$4M | +1.57% | +18.8% | +1.76 |
+| **chase_d10+skip_panic** | **278** | **$471M** | **$39M** | **+$7M** | **+1.61%** | **+19.3%** | **+1.83** |
+| chase_d10+half_bad_bank | 327 | $377M | $33M | +$6M | +1.57% | +18.8% | +1.64 |
+| **chase_d10+half_bank+skip_panic** | **278** | **$355M** | **$30M** | **+$6M** | **+1.77%** | **+21.2%** | **+1.81** |
+| chase_d10+skip_bad_bank | 156 | $258M | $24M | +$5M | +1.78% | +21.4% | +1.44 |
+| all_skips | 73 | $176M | $14M | +$3M | +1.40% | +16.7% | +1.07 |
 
 ## Findings
 
@@ -113,17 +114,17 @@ losers AND upsize the winners.
 Two clean choices depending on objective:
 
 ### Risk-adjusted optimum: `chase_d10+skip_panic`
-- **Sharpe 2.08** (best in sweep)
-- Annualized **+22.4%** hedged
+- **Sharpe 1.83** (best in sweep)
+- Annualized **+19.3%** hedged
 - Avg daily GMV **$471M** (close to baseline)
-- Monthly P&L **+$8M** (baseline level + chase_d10 upsize)
+- Monthly P&L **+$7M** (baseline level + chase_d10 upsize)
 - 278 trades (drops 49 panic-day trades; upsizes 56 D10 to 1.5×)
 
 ### Capital-efficient at scale: `chase_d10+half_bank+skip_panic`
-- Sharpe **+2.03**
-- Annualized **+24.4%** hedged (highest of the high-Sharpe set)
+- Sharpe **+1.81**
+- Annualized **+21.2%** hedged (highest of the high-Sharpe set)
 - Avg daily GMV **$355M** (18% smaller than baseline)
-- Monthly P&L **+$7M**
+- Monthly P&L **+$6M**
 - Same 278 trades plus 0.5× on 140 bad-bank trades
 
 The second uses less gross capital for slightly less P&L

@@ -13,17 +13,16 @@ Stops checked against target close vs offer_price; trigger
 fires when `close ≤ offer × (1 + stop_pct)`. On trigger, the
 entire position (both legs) exits at next day's close.
 
-## Sweep results
+## Sweep results (net of 10 bps × 4 sides costs)
 
 | stop | n_stops | avg GMV | unh mo P&L | hed mo P&L | ann unh | **ann hed** | sharpe_u | **sharpe_h** |
 |---|---|---|---|---|---|---|---|---|
-| none | 0 | $515M | +$10.0M | +$7.2M | +15.0% | +15.6% | +0.86 | +1.41 |
-| −2% | 202 | $292M | +$6.0M | +$4.6M | +18.7% | +17.2% | +1.10 | +1.30 |
-| −3% | 162 | $339M | +$5.9M | +$4.5M | +17.0% | +15.5% | +1.20 | +1.37 |
-| −5% | 127 | $388M | +$5.6M | +$5.2M | +14.0% | +15.8% | +1.03 | +1.60 |
-| −7% | 93 | $437M | +$6.8M | +$6.0M | +12.2% | +16.7% | +0.95 | +1.99 |
-| **−10%** | **55** | **$474M** | **+$8.9M** | **+$6.8M** | +16.8% | **+19.0%** | +1.28 | **+2.33** |
-| −15% | 19 | $501M | +$9.6M | +$7.0M | +15.9% | +18.5% | +1.13 | +2.41 |
+| none | 0 | $515M | +$9.4M | +$6.1M | +13.4% | +12.7% | +0.76 | +1.14 |
+| −5% | 127 | $388M | +$5.0M | +$4.1M | +12.0% | +12.1% | +0.88 | +1.24 |
+| −7% | 93 | $437M | +$6.2M | +$4.9M | +10.3% | +13.3% | +0.80 | +1.63 |
+| **−8% (default)** | 82 | $436M | +$6.5M | +$4.8M | +12.6% | **+14.5%** | +0.93 | **+1.61** |
+| **−10%** | **55** | **$474M** | **+$8.3M** | **+$5.8M** | +15.1% | **+16.0%** | +1.15 | **+2.01** |
+| −15% | 19 | $501M | +$9.0M | +$5.9M | +14.2% | +15.6% | +1.01 | +2.07 |
 
 **Two clean optima**:
 - **Hedged: looser stops dominate.** Sharpe rises monotonically
@@ -150,22 +149,21 @@ trades dominate (avg corr ≈ 0.6).
 ## Default
 
 **stop_pct = −0.08** (compromise between drawdown protection
-and recovery capture):
+and recovery capture), net of costs:
 
-| metric | −5% (prior) | **−8% (current)** | −10% (loosest tested) |
+| metric | −5% | **−8% (current)** | −10% |
 |---|---|---|---|
-| hedged Sharpe (annual) | +1.60 | **+1.92** | +2.33 |
-| annualized hedged | +15.8% | **+17.7%** | +19.0% |
+| hedged Sharpe (annual) | +1.24 | **+1.61** | +2.01 |
+| annualized hedged | +12.1% | **+14.5%** | +16.0% |
 | n stops (20d) | 127 | **82** | 55 |
 | avg daily gross GMV | $388M | $436M | $474M |
 | peak DD | −$11.9M | −$11.9M | −$11.9M |
 
-−8% captures ~⅔ of the Sharpe improvement from going loose
-(+1.60 → +1.92 → +2.33) while still firing on 82 trades —
-roughly the cohort that breaches the −5% to −8% range without
-recovering. Trades that fall to −8% but recover by horizon
-are still forced out, but the recovery alpha in the −5% to
-−8% band is preserved.
+−8% captures most of the Sharpe improvement from going loose
+(+1.24 → +1.61 → +2.01) while still firing on 82 trades. The
+−10% setting is incrementally better (Sharpe +2.01, ann
++16.0%) but the marginal benefit from going from −8% to −10%
+is smaller than from −5% to −8% — diminishing returns.
 
 ## Caveats
 

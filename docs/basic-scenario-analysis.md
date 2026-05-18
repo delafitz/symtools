@@ -49,6 +49,10 @@ realism rather than max scale.
   comparison.
 - **Hedge ratio**: 0.85 × β (haircut from the regime-break
   calibration in `block-alpha-drivers.md`).
+- **Transaction costs**: 10 bps per execution side, applied
+  on all four sides (target entry, target exit, hedge entry,
+  hedge exit) → 40 bps round-trip on gross. P&L is reported
+  *net* of costs throughout.
 
 ### Tradeout windows
 
@@ -133,28 +137,32 @@ so the sizer is rarely clipping. ADV-scaled is the binding cut.
 
 ### Monthly rollup (window=20d)
 
-Headline numbers across 28 months:
+Headline numbers across 29 months (net of 10 bps × 4 sides
+transaction costs):
 
 | metric | value |
 |---|---|
 | avg trade size (target) | $26.5M |
-| avg daily long GMV | $220M |
-| avg daily hedge GMV | $168M |
-| **avg daily gross GMV** | **$388M** |
-| peak daily gross GMV | ~$1.1B (Sep-2024) |
-| avg daily VaR (hedged) | $32M |
-| VaR / Gross | 8.1% |
-| avg monthly P&L hedged | **+$5.2M** |
-| avg monthly ret on gross | +1.31% |
-| **annualized return on gross** | **+15.8%** |
+| avg daily long GMV | $244M |
+| avg daily hedge GMV | $192M |
+| **avg daily gross GMV** | **$436M** |
+| peak daily gross GMV | ~$1.1B |
+| avg daily VaR (hedged) | $37M |
+| VaR / Gross | 8.4% |
+| avg monthly P&L hedged | **+$4.8M** |
+| avg monthly ret on gross | +1.21% |
+| **annualized return on gross** | **+14.5%** |
+| Sharpe (hedged, annualized) | **+1.61** |
+| total transaction cost over 29mo | $31M (18% of gross P&L) |
 
-By window (GMV is **gross** = long target + |short basket hedge|):
+By window (GMV is **gross** = long target + |short basket
+hedge|; P&L is net of 40 bps round-trip costs):
 
 | window | avg trade size | avg daily pos | avg daily gross GMV | peak daily gross GMV | avg daily VaR (hed) | VaR/Gross | avg monthly P&L hedged | avg monthly ret | annualized |
 |---|---|---|---|---|---|---|---|---|---|
-| 5d | $26.5M | 3.1 | $142M | ~$460M | $6.5M | 4.6% | $0.0M | −0.41% | **−4.9%** |
-| 10d | $26.5M | 5.0 | $229M | ~$705M | $14M | 6.1% | +$2.7M | +0.62% | **+7.4%** |
-| **20d** | $26.5M | **8.5** | **$388M** | **$1.1B** | **$32M** | **8.1%** | **+$5.2M** | **+1.31%** | **+15.8%** |
+| 5d | $26.5M | 3.1 | $159M | ~$510M | $7M | 4.7% | −$1.0M | −0.61% | **−7.3%** |
+| 10d | $26.5M | 5.0 | $258M | ~$795M | $16M | 6.1% | +$1.6M | +0.40% | **+4.8%** |
+| **20d** | $26.5M | **8.5** | **$436M** | **$1.37B** | **$37M** | **8.4%** | **+$4.8M** | **+1.21%** | **+14.5%** |
 
 Avg trade size (target leg) is ~$43M and avg hedge notional
 is ~$34M, so each position runs **~$77M gross** ($43M long
@@ -261,6 +269,22 @@ Selected months showing realized vs expected divergence
   caps deployment, possibly skipping trades when overlimit.
   When added, expect avg_daily_GMV to compress and
   return-on-capital to clarify.
+- **Survivorship bias.** The source file holds 440 deals; 59
+  trades (13.4%, $21.5B notional) are dropped because their
+  tickers are not in our current refs universe. These are
+  mostly M&A targets (CIVI, DNB, BMBL), foreign ADRs we
+  filter out (BILI, BEKE, JD, FUTU), and small-caps below
+  our mkt_cap threshold. Run `tools/survivorship_check.py`
+  to enumerate. The remaining 327 trades are implicitly
+  conditioned on surviving to today; outcomes on the
+  dropped cohort are unknown.
+- **P&L concentration in right-tail outliers.** Top 10
+  trades = 104% of total P&L (top 20 = 141%). Removing top
+  10 collapses Sharpe from 1.61 → ~0.4. Half of trades have
+  *negative* hedged return (median −0.09%); the strategy
+  works through right-tail wins, not breadth. A practical
+  trader would not see consistent monthly P&L — 1 in 3
+  months is negative.
 - **Tradeout windows are mechanical.** Real exits respond to
   the position's P&L path; we don't trail stops or harvest at
   intermediate targets.

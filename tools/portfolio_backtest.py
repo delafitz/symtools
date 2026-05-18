@@ -38,6 +38,7 @@ from app.services.portfolio.aggregator import (
 )
 from app.services.portfolio.expected import compute_expected
 from app.services.portfolio.position import (
+    DEFAULT_COST_BPS,
     DEFAULT_HEDGE_RATIO,
     DEFAULT_STOP_PCT,
     score_position,
@@ -146,6 +147,7 @@ def run(
     size_params: SizeParams,
     hedge_ratio: float,
     stop_pct: float,
+    cost_bps_per_side: float = DEFAULT_COST_BPS,
 ) -> tuple[pl.DataFrame, dict[int, pl.DataFrame]]:
     trades = pl.read_parquet('data/backtest_trades.parquet')
     scores = pl.read_parquet('data/backtest_scores.parquet')
@@ -214,6 +216,7 @@ def run(
                 window_d=w,
                 hedge_ratio=hedge_ratio,
                 stop_pct=stop_pct,
+                cost_bps_per_side=cost_bps_per_side,
             )
             if res is None:
                 skipped['no_score'] += 1
@@ -315,6 +318,7 @@ def main() -> None:
     cap_usd = 100_000_000
     hedge_ratio = DEFAULT_HEDGE_RATIO
     stop_pct = DEFAULT_STOP_PCT  # -0.08 by default
+    cost_bps = DEFAULT_COST_BPS  # 10 bps/side
 
     while args:
         flag = args.pop(0)
@@ -336,6 +340,8 @@ def main() -> None:
             hedge_ratio = float(args.pop(0))
         elif flag == '--stop':
             stop_pct = float(args.pop(0))
+        elif flag == '--cost-bps':
+            cost_bps = float(args.pop(0))
         else:
             print(f'unknown arg: {flag}', file=sys.stderr)
             sys.exit(1)
@@ -352,6 +358,7 @@ def main() -> None:
         size_params=size_params,
         hedge_ratio=hedge_ratio,
         stop_pct=stop_pct,
+        cost_bps_per_side=cost_bps,
     )
     if positions.is_empty():
         sys.exit(1)
