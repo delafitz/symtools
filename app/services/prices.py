@@ -28,8 +28,14 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 # key -> (timespan, multiplier, unit, defaultScale, maxScale)
+# Y maxScale=5 because point-in-time Barra needs MOM_WINDOW
+# (~250 trading days) of pre-history beyond the factor-return
+# window. To get ~250 real factor returns at an as-of date, the
+# parquet must reach ~500 trading days before it; 5y depth
+# covers the oldest block trades (~2024) with room to spare.
+# All other consumers slice down to defaultScale.
 HIST_TEMPLATES = {
-    'Y': ('day', 1, 'years', 1, 2),
+    'Y': ('day', 1, 'years', 1, 5),
     'M': ('day', 1, 'months', 3, 6),
     'W': ('minute', 30, 'weeks', 2, 4),
     'D': ('minute', 10, 'days', 5, 10),

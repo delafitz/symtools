@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
 
 from app.utils.market import (
+    ET,
     last_trading_day,
     last_weekday,
     weekdays_back,
@@ -37,7 +38,14 @@ def round_ts(ts: int, timespan: str, multiplier: int) -> int:
 
 
 def ts_to_date(ts):
-    return datetime.fromtimestamp(ts * 1e-3).strftime(DT_FMT)
+    """Date label for a bar timestamp in ET.
+
+    Bars are labeled by their ET trading day so date joins
+    against external dates (block trades, market.py helpers)
+    work correctly. The `iso` column still shows the absolute
+    instant in UTC.
+    """
+    return datetime.fromtimestamp(ts * 1e-3, tz=ET).strftime(DT_FMT)
 
 
 def ns_to_dt(ts):

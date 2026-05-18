@@ -184,10 +184,14 @@ class Cache:
             log.yellow(f'startup summary:\n{summary}')
 
     def _load_block_trades(self) -> None:
-        """Load block trades file and cross-check against refs."""
+        """Load block trades file and cross-check against refs.
+
+        `hists` is passed in so discount can be rebuilt from
+        the pre-block close (source `Disc` field is unreliable).
+        """
         if self.refs is None:
             return
-        self.block_trades = load_block_trades(self.refs)
+        self.block_trades = load_block_trades(self.refs, self.hists)
 
     def _init_baskets(self) -> None:
         """Create basket service, pre-build analytics."""

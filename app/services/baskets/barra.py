@@ -412,7 +412,13 @@ def build_barra_model(
     for sid in active_sector_ids:
         factor_cols[f'sector_{sid}'] = factor_sector[sid].tolist()
 
-    factor_df = pl.DataFrame(factor_cols).slice(1)
+    # Style factor returns are zero for indices [0, MOM_WINDOW)
+    # because rebal_dates start at MOM_WINDOW and the loop never
+    # populates earlier slots. Drop that zero-padded prefix so
+    # downstream consumers don't accidentally compute covariance
+    # over a range that includes those zeros (which would
+    # collapse variance and break the FactorModel prior).
+    factor_df = pl.DataFrame(factor_cols).slice(MOM_WINDOW)
 
     n_factors = 1 + len(style_names) + len(active_sector_ids)
 
