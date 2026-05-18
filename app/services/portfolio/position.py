@@ -7,9 +7,16 @@ Trade mechanics:
     entered at basket close on T0.
   - Planned exit: 1/3 of position each day at close on
     T+(w-2), T+(w-1), T+w. Both legs exit on the same schedule.
-  - Stop loss: if target close ≤ offer × (1 + stop_pct) on
-    any day before the ramp completes, exit *all remaining*
-    position at the next day's close (both legs).
+  - Stop loss: two bases supported via `stop_basis`:
+      'hedged' (default): trigger when daily-marked NET
+        position P&L (target + hedge) ≤ stop_pct × notional.
+        Reflects what the trader actually sees on a marked
+        hedged book.
+      'target': trigger when target close alone ≤
+        offer × (1 + stop_pct). Older convention; doesn't
+        credit hedge offset.
+    Exit semantics unchanged: full liquidation of both legs at
+    next day's close after the stop day.
 
 Returns are reported per-window: a single Position with three
 PositionResults (one per tradeout horizon) is the unit.
@@ -24,6 +31,7 @@ import polars as pl
 
 DEFAULT_HEDGE_RATIO = 0.85
 DEFAULT_STOP_PCT = -0.08
+DEFAULT_STOP_BASIS = 'hedged'  # 'hedged' or 'target'
 # Round-trip transaction cost per side (bps). Charged on
 # target entry, target exit, hedge entry, hedge exit — so the
 # total round-trip cost is 4 × bps × notional. 10 bps/side
@@ -67,6 +75,7 @@ class PositionResult:
     cost_hedge_usd: float
 
     # Stop diagnostics
+    stop_basis: str
     stop_triggered: bool
     stop_day: str | None
 
@@ -115,6 +124,7 @@ def score_position(
     hedge_ratio: float = DEFAULT_HEDGE_RATIO,
     stop_pct: float = DEFAULT_STOP_PCT,
     cost_bps_per_side: float = DEFAULT_COST_BPS,
+    stop_basis: str = DEFAULT_STOP_BASIS,
 ) -> PositionResult | None:
     """Score one trade at one tradeout horizon.
 
@@ -153,7 +163,6 @@ def score_position(
         return None
 
     ramp_start = planned_ramp[0]
-    stop_threshold = offer_price * (1.0 + stop_pct)
 
     # Walk T+1 .. T+(w-3) looking for stop trigger
     pre_ramp = (
@@ -170,11 +179,34 @@ def score_position(
     exit_target_pxs: list[float]
     exit_basket_pxs: list[float]
 
-    for r in pre_ramp.iter_rows(named=True):
-        if r['close'] <= stop_threshold:
-            stop_day = r['date']
-            stop_triggered = True
-            break
+    if stop_basis == 'target':
+        # Target-only stop: target close ≤ offer × (1 + stop_pct)
+        stop_threshold = offer_price * (1.0 + stop_pct)
+        for r in pre_ramp.iter_rows(named=True):
+            if r['close'] <= stop_threshold:
+                stop_day = r['date']
+                stop_triggered = True
+                break
+    else:
+        # Hedged-P&L stop: daily-marked net return ≤ stop_pct
+        # Net P&L_d = target_pnl_d + hedge_pnl_d (pre-cost; the
+        # round-trip cost is paid at exit, not relevant for
+        # the trigger).
+        shares_marked = notional_usd / offer_price
+        for r in pre_ramp.iter_rows(named=True):
+            d = r['date']
+            t_close = r['close']
+            b_close = _close_on(basket_close, d)
+            if b_close is None:
+                continue
+            t_pnl = shares_marked * (t_close - offer_price)
+            b_ret = b_close / basket_entry - 1
+            h_pnl = -hedge_notional * b_ret
+            net_ret = (t_pnl + h_pnl) / notional_usd
+            if net_ret <= stop_pct:
+                stop_day = d
+                stop_triggered = True
+                break
 
     if stop_triggered:
         # Full exit at next session's close after stop_day
@@ -253,6 +285,7 @@ def score_position(
         cost_bps_per_side=cost_bps_per_side,
         cost_target_usd=cost_target,
         cost_hedge_usd=cost_hedge,
+        stop_basis=stop_basis,
         stop_triggered=stop_triggered,
         stop_day=stop_day,
     )

@@ -1,11 +1,15 @@
 """Position sizing for the portfolio backtest.
 
 Notional size is a fixed fraction of trailing ADV ($), clamped
-to a global floor and cap. The fraction is parameterized so we
-can sweep across strategies.
+to a global floor and cap. An optional VaR cap further scales
+the position down so that hedged 99% VaR (at the configured
+horizon) does not exceed `var_cap_usd`.
 """
 
 from dataclasses import dataclass
+
+Z_99 = 2.3263478740408408  # one-sided 99% normal
+DAILY_ANN = 252 ** 0.5 * 100  # vol stored as annualized %
 
 
 @dataclass(frozen=True)
@@ -13,12 +17,47 @@ class SizeParams:
     pct_adv: float = 0.15
     floor_usd: float = 10_000_000
     cap_usd: float = 100_000_000
+    # Soft cap on hedged 99% VaR per position. Set to None
+    # to disable. Default $50M is permissive — caps only the
+    # extreme-vol outliers (~5% of trades) at a tiny return
+    # cost while bounding single-position tail risk.
+    var_cap_usd: float | None = 50_000_000
+    var_horizon_days: int = 20
 
 
-def size_position(adv_usd: float, params: SizeParams) -> float:
-    """Notional $ for one position. Returns 0 if adv_usd is
-    missing or non-positive."""
+def size_position(
+    adv_usd: float,
+    params: SizeParams,
+    *,
+    vol_90d_annual_pct: float | None = None,
+    corr: float | None = None,
+) -> float:
+    """Notional $ for one position.
+
+    Returns 0 if adv_usd is missing/non-positive. When
+    `params.var_cap_usd` is set, also requires `vol_90d` (and
+    optionally `corr`) to apply the VaR-based cap; if those
+    are missing, the VaR cap is silently skipped.
+    """
     if not adv_usd or adv_usd <= 0:
         return 0.0
     raw = params.pct_adv * adv_usd
-    return max(params.floor_usd, min(params.cap_usd, raw))
+    notional = max(params.floor_usd, min(params.cap_usd, raw))
+
+    if (
+        params.var_cap_usd
+        and vol_90d_annual_pct
+        and vol_90d_annual_pct > 0
+    ):
+        sig_daily = vol_90d_annual_pct / DAILY_ANN
+        rho = max(0.0, min(0.99, corr or 0.0))
+        sig_hedged = sig_daily * ((1 - rho * rho) ** 0.5)
+        if sig_hedged > 0:
+            max_n = params.var_cap_usd / (
+                sig_hedged
+                * (params.var_horizon_days ** 0.5)
+                * Z_99
+            )
+            notional = min(notional, max_n)
+
+    return max(0.0, notional)

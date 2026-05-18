@@ -40,6 +40,7 @@ from app.services.portfolio.expected import compute_expected
 from app.services.portfolio.position import (
     DEFAULT_COST_BPS,
     DEFAULT_HEDGE_RATIO,
+    DEFAULT_STOP_BASIS,
     DEFAULT_STOP_PCT,
     score_position,
 )
@@ -148,6 +149,7 @@ def run(
     hedge_ratio: float,
     stop_pct: float,
     cost_bps_per_side: float = DEFAULT_COST_BPS,
+    stop_basis: str = DEFAULT_STOP_BASIS,
 ) -> tuple[pl.DataFrame, dict[int, pl.DataFrame]]:
     trades = pl.read_parquet('data/backtest_trades.parquet')
     scores = pl.read_parquet('data/backtest_scores.parquet')
@@ -184,7 +186,12 @@ def run(
             skipped['no_basket'] += 1
             continue
 
-        notional = size_position(adv_usd or 0, size_params)
+        notional = size_position(
+            adv_usd or 0,
+            size_params,
+            vol_90d_annual_pct=vol,
+            corr=rho,
+        )
         if notional <= 0:
             skipped['no_size'] += 1
             continue
@@ -217,6 +224,7 @@ def run(
                 hedge_ratio=hedge_ratio,
                 stop_pct=stop_pct,
                 cost_bps_per_side=cost_bps_per_side,
+                stop_basis=stop_basis,
             )
             if res is None:
                 skipped['no_score'] += 1
@@ -316,9 +324,11 @@ def main() -> None:
     pct_adv = 0.15
     floor_usd = 10_000_000
     cap_usd = 100_000_000
+    var_cap_usd: float | None = 50_000_000  # soft cap; ~5% of trades clipped
     hedge_ratio = DEFAULT_HEDGE_RATIO
     stop_pct = DEFAULT_STOP_PCT  # -0.08 by default
     cost_bps = DEFAULT_COST_BPS  # 10 bps/side
+    stop_basis = DEFAULT_STOP_BASIS  # 'hedged'
 
     while args:
         flag = args.pop(0)
@@ -336,18 +346,25 @@ def main() -> None:
             floor_usd = float(args.pop(0))
         elif flag == '--cap':
             cap_usd = float(args.pop(0))
+        elif flag == '--var-cap':
+            var_cap_usd = float(args.pop(0))
         elif flag == '--hedge-ratio':
             hedge_ratio = float(args.pop(0))
         elif flag == '--stop':
             stop_pct = float(args.pop(0))
         elif flag == '--cost-bps':
             cost_bps = float(args.pop(0))
+        elif flag == '--stop-basis':
+            stop_basis = args.pop(0)
         else:
             print(f'unknown arg: {flag}', file=sys.stderr)
             sys.exit(1)
 
     size_params = SizeParams(
-        pct_adv=pct_adv, floor_usd=floor_usd, cap_usd=cap_usd
+        pct_adv=pct_adv,
+        floor_usd=floor_usd,
+        cap_usd=cap_usd,
+        var_cap_usd=var_cap_usd,
     )
 
     positions, monthly = run(
@@ -359,6 +376,7 @@ def main() -> None:
         hedge_ratio=hedge_ratio,
         stop_pct=stop_pct,
         cost_bps_per_side=cost_bps,
+        stop_basis=stop_basis,
     )
     if positions.is_empty():
         sys.exit(1)

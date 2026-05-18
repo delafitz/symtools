@@ -7,6 +7,18 @@ realized P&L (attributed to the exit date).
 
 Returns are annualized by ×12 simple (consistent with the
 monthly Sharpe annualization elsewhere).
+
+Portfolio VaR uses a constant pairwise-correlation assumption
+(Option B) to capture diversification across simultaneously
+open positions. For N positions with hedged VaRs vᵢ:
+
+    portfolio_var(ρ) = √((1-ρ) · Σ vᵢ² + ρ · (Σ vᵢ)²)
+
+At ρ=1 this reduces to Σ vᵢ (sum of single-position VaRs, the
+conservative ceiling). At ρ=0 it reduces to √Σ vᵢ² (pure
+diversification, only defensible if residuals are truly
+orthogonal). The reported band uses ρ ∈ {0.1, 0.3, 0.5} with
+0.3 as the headline number.
 """
 
 from __future__ import annotations
@@ -15,6 +27,8 @@ import polars as pl
 
 
 ANNUAL_MONTHS = 12
+RHO_BAND = (0.1, 0.3, 0.5)
+RHO_DEFAULT = 0.3
 
 
 def trading_calendar(hists: pl.DataFrame) -> list[str]:
@@ -131,12 +145,31 @@ def rolling_monthly(daily_held: pl.DataFrame) -> pl.DataFrame:
             pl.col('gross_notional_usd').sum().alias('gmv'),
             pl.col('var99_hedged_usd').sum().alias('var_h'),
             pl.col('var99_unhedged_usd').sum().alias('var_u'),
+            (pl.col('var99_hedged_usd') ** 2)
+                .sum().alias('var_h_sq_sum'),
             pl.col('pnl_realized_today').sum().alias('pnl_h'),
             pl.col('pnl_unhedged_today').sum().alias('pnl_u'),
             pl.col('exp_pnl_today').sum().alias('exp_pnl_h'),
         ])
     )
 
+    # Portfolio (diversified) VaR per day for each ρ in the band.
+    # pvar(ρ) = √((1-ρ)·Σvᵢ² + ρ·(Σvᵢ)²)
+    for rho in RHO_BAND:
+        col = f'pvar_h_{int(rho * 100):02d}'
+        daily = daily.with_columns(
+            (
+                (1 - rho) * pl.col('var_h_sq_sum')
+                + rho * pl.col('var_h') ** 2
+            ).sqrt().alias(col)
+        )
+
+    pvar_aggs = [
+        pl.col(f'pvar_h_{int(rho * 100):02d}').mean().alias(
+            f'avg_daily_pvar_h_{int(rho * 100):02d}'
+        )
+        for rho in RHO_BAND
+    ]
     monthly = (
         daily.group_by(['month', 'window_d'])
         .agg([
@@ -154,6 +187,7 @@ def rolling_monthly(daily_held: pl.DataFrame) -> pl.DataFrame:
             pl.col('var_h').mean().alias('avg_daily_var_hedged'),
             pl.col('var_u').mean().alias('avg_daily_var_unhedged'),
             pl.col('var_h').max().alias('peak_daily_var_hedged'),
+            *pvar_aggs,
             pl.col('pnl_h').sum().alias('pnl_hedged'),
             pl.col('pnl_u').sum().alias('pnl_unhedged'),
             pl.col('exp_pnl_h').sum().alias('exp_pnl_hedged'),

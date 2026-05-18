@@ -21,17 +21,47 @@ notional_$ = clip(pct_adv × adv_usd_30d, floor, cap)
 | `pct_adv` | 0.15 |
 | `floor` | $10M |
 | `cap` | $100M |
+| `var_cap_usd` | **$50M** (soft cap on hedged 99% VaR @ 20d) |
 
 ADV is the 30-day trailing average dollar volume at trade
 date, taken from `backtest_trades.parquet`. With these defaults
 the average target notional is **$26.5M** (median $13.9M; ~39%
-of trades hit the floor for small-ADV names, ~7% hit the cap).
+of trades hit the floor for small-ADV names, ~7% hit the
+$100M cap).
+
+The **$50M VaR cap** is a soft risk-mgmt guardrail. It clips
+notional further only on positions whose implied hedged
+20d VaR exceeds $50M — typically extreme-vol names
+(vol_90d > 90%). At the current configuration it touches
+~2 of 327 trades. Tightening the cap to $20-30M
+materially erodes return (the high-vol cohort is where
+the right-tail alpha lives — see VaR cap sensitivity below).
 
 The sweep tool (see `tools/portfolio_sizing_sweep.py`) shows the
 strategy is capacity-insensitive across a 4× notional range —
 annualized return stays at ~15% from `pct_adv=0.10` through
 `pct_adv=0.40` — so the default is set on the small end for
 realism rather than max scale.
+
+### VaR-cap sensitivity
+
+Tightening the VaR cap monotonically erodes both return and
+Sharpe — high-vol names are where the right-tail alpha sits,
+and the cap punishes them in proportion to their vol:
+
+| var_cap | avg_size | avg_GMV | avg_VaR_h | PnL_mo | ann_ret | Sharpe |
+|---|---|---|---|---|---|---|
+| none | $26.5M | $466M | $40M | +$5.36M | +15.9% | +1.88 |
+| **$50M (default)** | $26.4M | $465M | $39M | +$5.22M | +15.7% | +1.86 |
+| $30M | $25.9M | $458M | $38M | +$4.88M | +15.2% | +1.78 |
+| $20M | $24.5M | $435M | $35M | +$3.99M | +13.9% | +1.71 |
+| $10M | $21.4M | $382M | $29M | +$2.78M | +12.1% | +1.67 |
+
+The $50M default is a soft guardrail — clips only the 2 most
+extreme-vol positions (rddt 2024-11-22 vol 93%, app 2024-11-22
+vol 98%) and costs ~20bps annualized. Useful as a hard risk
+limit for capital allocation or regulatory single-name
+concentration — *not* a return-improvement lever.
 
 ### Trade mechanics
 
@@ -41,12 +71,13 @@ realism rather than max scale.
 - **Planned exit (both legs)**: ramp 1/3 per day at close on
   T+(w−2), T+(w−1), T+w. The buyer doesn't dump in one print
   to avoid impact.
-- **Stop loss**: if target close ≤ `offer × (1 − stop_pct)` on
-  any day before the ramp completes, exit *all remaining*
-  position (both legs) at next day's close. Default is **−8%**
-  (compromise between drawdown protection and recovery
-  capture). See `stop-loss-analysis.md` for the full sweep
-  comparison.
+- **Stop loss**: triggers when the **daily-marked hedged
+  P&L** falls to `stop_pct × notional`. Both legs liquidate at
+  next day's close. Default `stop_pct = −8%` on a hedged
+  basis. Hedged-P&L basis (vs. target-price basis) means the
+  stop only fires when the hedge has *also* failed to protect
+  the position — see `stop-loss-analysis.md` for the full
+  sweep + comparison.
 - **Hedge ratio**: 0.85 × β (haircut from the regime-break
   calibration in `block-alpha-drivers.md`).
 - **Transaction costs**: 10 bps per execution side, applied
@@ -105,10 +136,16 @@ window the average comes out to ~67% of horizon VaR.
   full gross notional to GMV each trading day from T+1
   through the exit date (slight overstatement during the
   3-day ramp).
-- **VaR aggregation**: each position's hedged VaR is summed
-  across open positions for the day. No cross-position
-  diversification is applied; portfolio VaR is the
-  conservative independent-positions bound.
+- **VaR aggregation** — two values reported:
+  1. *sum-of-VaRs* (ρ=1): Σ single-position hedged VaRs.
+     Conservative ceiling assuming all positions move together.
+  2. *portfolio VaR* with constant pairwise correlation ρ:
+     `√((1-ρ)·Σvᵢ² + ρ·(Σvᵢ)²)`. Default **ρ=0.3** as the
+     headline; **ρ=0.1 and ρ=0.5 reported as a band**. Hedged
+     residuals are theoretically near-orthogonal after the
+     basket removes common factor exposure; ρ=0.3 leaves
+     headroom for stress regimes where residual correlations
+     spike.
 - **Monthly rollup**:
   - `avg_daily_positions` = mean count of open positions per
     trading day
@@ -138,31 +175,41 @@ so the sizer is rarely clipping. ADV-scaled is the binding cut.
 ### Monthly rollup (window=20d)
 
 Headline numbers across 29 months (net of 10 bps × 4 sides
-transaction costs):
+transaction costs, with hedged-P&L stop at −8%, $50M VaR cap,
+portfolio VaR at ρ=0.3):
 
 | metric | value |
 |---|---|
 | avg trade size (target) | $26.5M |
-| avg daily long GMV | $244M |
-| avg daily hedge GMV | $192M |
-| **avg daily gross GMV** | **$436M** |
+| avg daily long GMV | $259M |
+| avg daily hedge GMV | $206M |
+| **avg daily gross GMV** | **$465M** |
 | peak daily gross GMV | ~$1.1B |
-| avg daily VaR (hedged) | $37M |
-| VaR / Gross | 8.4% |
-| avg monthly P&L hedged | **+$4.8M** |
-| avg monthly ret on gross | +1.21% |
-| **annualized return on gross** | **+14.5%** |
-| Sharpe (hedged, annualized) | **+1.61** |
-| total transaction cost over 29mo | $31M (18% of gross P&L) |
+| avg daily sum-of-VaRs (hedged, ρ=1) | $39.2M |
+| avg daily portfolio VaR (ρ=0.30) | **$26.2M** |
+| portfolio VaR / gross GMV | 5.6% (was 8.4% under sum-of-VaR) |
+| diversification benefit at ρ=0.3 | ~33% of sum-of-VaR |
+| avg monthly P&L hedged | **+$5.2M** |
+| avg monthly ret on gross | +1.31% |
+| **annualized return on gross** | **+15.7%** |
+| Sharpe (hedged, annualized) | **+1.86** |
+| n_stops triggered (20d) | ~57 |
+
+**Diversification band**: at ρ=0.1 (highly orthogonal
+hedged residuals) portfolio VaR is **$20.9M (53% of sum)**;
+at ρ=0.5 (correlated stress regime) it is **$30.5M (78% of
+sum)**. The default ρ=0.3 sits between these as the
+conservative-realistic middle.
 
 By window (GMV is **gross** = long target + |short basket
-hedge|; P&L is net of 40 bps round-trip costs):
+hedge|; P&L is net of 40 bps round-trip costs; hedged-P&L
+stop at −8%):
 
 | window | avg trade size | avg daily pos | avg daily gross GMV | peak daily gross GMV | avg daily VaR (hed) | VaR/Gross | avg monthly P&L hedged | avg monthly ret | annualized |
 |---|---|---|---|---|---|---|---|---|---|
-| 5d | $26.5M | 3.1 | $159M | ~$510M | $7M | 4.7% | −$1.0M | −0.61% | **−7.3%** |
-| 10d | $26.5M | 5.0 | $258M | ~$795M | $16M | 6.1% | +$1.6M | +0.40% | **+4.8%** |
-| **20d** | $26.5M | **8.5** | **$436M** | **$1.37B** | **$37M** | **8.4%** | **+$4.8M** | **+1.21%** | **+14.5%** |
+| 5d | $26.5M | 3.3 | $146M | ~$480M | $7M | 4.5% | −$1.0M | −0.65% | **−7.7%** |
+| 10d | $26.5M | 5.6 | $254M | ~$760M | $16M | 6.2% | +$2.5M | +0.74% | **+8.9%** |
+| **20d** | $26.5M | **9.4** | **$466M** | **$1.37B** | **$40M** | **8.5%** | **+$5.4M** | **+1.33%** | **+15.9%** |
 
 Avg trade size (target leg) is ~$43M and avg hedge notional
 is ~$34M, so each position runs **~$77M gross** ($43M long

@@ -9,20 +9,42 @@ Population: all 327 hedgeable trades from the alt dataset at
 the 20d window. Sizing: pct_adv=0.15, floor=$10M, cap=$100M.
 Hedge ratio: 0.85 × β.
 
-Stops checked against target close vs offer_price; trigger
-fires when `close ≤ offer × (1 + stop_pct)`. On trigger, the
-entire position (both legs) exits at next day's close.
+**Stop basis: hedged P&L** (current default). On each daily
+close, we compute the marked net P&L:
+```
+net_ret_d = (shares × (close_d − offer) − hedge_notional × (basket_d/basket_T − 1)) / notional
+```
+If `net_ret_d ≤ stop_pct`, the position exits both legs at the
+next day's close. This is the trigger a real hedged book would
+respond to — the stop fires only when the hedge has failed to
+protect the position. Setting `stop_basis='target'` reverts to
+the older target-close-only convention; the sweep below shows
+the new hedged-basis behavior.
 
-## Sweep results (net of 10 bps × 4 sides costs)
+## Sweep results (hedged-P&L basis, net of 40 bps round-trip)
 
 | stop | n_stops | avg GMV | unh mo P&L | hed mo P&L | ann unh | **ann hed** | sharpe_u | **sharpe_h** |
 |---|---|---|---|---|---|---|---|---|
 | none | 0 | $515M | +$9.4M | +$6.1M | +13.4% | +12.7% | +0.76 | +1.14 |
-| −5% | 127 | $388M | +$5.0M | +$4.1M | +12.0% | +12.1% | +0.88 | +1.24 |
-| −7% | 93 | $437M | +$6.2M | +$4.9M | +10.3% | +13.3% | +0.80 | +1.63 |
-| **−8% (default)** | 82 | $436M | +$6.5M | +$4.8M | +12.6% | **+14.5%** | +0.93 | **+1.61** |
-| **−10%** | **55** | **$474M** | **+$8.3M** | **+$5.8M** | +15.1% | **+16.0%** | +1.15 | **+2.01** |
-| −15% | 19 | $501M | +$9.0M | +$5.9M | +14.2% | +15.6% | +1.01 | +2.07 |
+| **−5%** | 106 | $418M | +$7.8M | +$6.0M | +17.9% | **+20.3%** | +1.33 | **+2.12** |
+| −7% | 73 | $453M | +$7.3M | +$5.2M | +13.5% | +16.1% | +0.89 | +1.82 |
+| **−8% (default)** | 57 | $466M | +$7.9M | +$5.4M | +14.2% | **+15.9%** | +0.95 | **+1.88** |
+| −10% | 37 | $483M | +$8.4M | +$5.5M | +15.0% | +16.1% | +1.07 | +1.88 |
+| −15% | 13 | $505M | +$9.2M | +$6.0M | +15.4% | +15.9% | +1.10 | +2.00 |
+
+**Important reframe with hedged-basis stops**: a −5% stop on
+the hedged basis only fires when the *net* position is down
+5% — a substantially less aggressive trigger than a −5% stop
+on the target leg alone (which would fire on a 5% target
+drop even if the hedge fully protected). Under the hedged
+basis, **−5% becomes the Sharpe-optimal level** (+2.12) with
+the highest annualized hedged return (+20.3%).
+
+The current default of −8% is conservative-but-defensible
+(Sharpe 1.88, ann 15.9%); the sweep suggests **−5% hedged
+might be the better setting**. We're keeping −8% as default
+for now since that's what was specified earlier, but the
+data argues for tightening.
 
 **Two clean optima**:
 - **Hedged: looser stops dominate.** Sharpe rises monotonically
@@ -148,22 +170,25 @@ trades dominate (avg corr ≈ 0.6).
 
 ## Default
 
-**stop_pct = −0.08** (compromise between drawdown protection
-and recovery capture), net of costs:
+**stop_basis = 'hedged'**, **stop_pct = −0.08**, hedged-P&L
+basis. The hedged basis fires less often than the same
+threshold on the target basis would, because the hedge
+absorbs much of the directional move. Under target basis a
+−8% stop required the target to drop 8%; under hedged basis
+it requires net P&L (target gain/loss combined with hedge
+gain/loss) to be down 8%.
 
-| metric | −5% | **−8% (current)** | −10% |
+| metric | −5% hedged | **−8% (current default)** | −10% hedged |
 |---|---|---|---|
-| hedged Sharpe (annual) | +1.24 | **+1.61** | +2.01 |
-| annualized hedged | +12.1% | **+14.5%** | +16.0% |
-| n stops (20d) | 127 | **82** | 55 |
-| avg daily gross GMV | $388M | $436M | $474M |
-| peak DD | −$11.9M | −$11.9M | −$11.9M |
+| hedged Sharpe (annual) | +2.12 | **+1.88** | +1.88 |
+| annualized hedged | +20.3% | **+15.9%** | +16.1% |
+| n stops (20d) | 106 | **57** | 37 |
+| avg daily gross GMV | $418M | $466M | $483M |
 
-−8% captures most of the Sharpe improvement from going loose
-(+1.24 → +1.61 → +2.01) while still firing on 82 trades. The
-−10% setting is incrementally better (Sharpe +2.01, ann
-+16.0%) but the marginal benefit from going from −8% to −10%
-is smaller than from −5% to −8% — diminishing returns.
+The Sharpe-optimal level on the hedged basis is **−5%**
+(Sharpe 2.12, ann +20.3%). The current default −8% is
+conservative; a future change to −5% hedged is worth
+considering as the new baseline.
 
 ## Caveats
 
