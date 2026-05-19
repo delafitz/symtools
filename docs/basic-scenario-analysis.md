@@ -296,19 +296,37 @@ Selected months showing realized vs expected divergence
   caps deployment, possibly skipping trades when overlimit.
   When added, expect avg_daily_GMV to compress and
   return-on-capital to clarify.
-- **Survivorship + data-quality filters.** The source file
-  holds 440 deals; 34 are dropped because their tickers are
-  not in our current refs universe (mostly M&A targets:
-  CIVI, DNB, BMBL; foreign ADRs: BILI, BEKE, JD, FUTU;
-  sub-threshold mkt cap). A further ~35 are dropped by
-  block_trades sanity filters (no pre-close, premium prices,
-  |discount| > 15%). 33 trades fall under `MIN_DEAL_SIZE`
-  ($100M floor — many are clear data errors with `shares`
-  field mis-recorded by factor of 10×/100×) and 2 trades
-  exceed `MAX_XADV` (CMPR at 56× and IAUX at 51× — half-of-
-  float crossings, not overnight blocks). 296 trades remain
-  at the 20d window. Run `tools/survivorship_check.py` to
-  enumerate the refs drops.
+- **Survivorship + data-quality filters.** Source file
+  has 440 deals. The drops break down as:
+  - **59 deals / $21.5B notional** dropped at the refs
+    layer (ticker not in current refs). This splits into
+    three distinct categories — only the last two are
+    actual survivorship:
+    - **Foreign ADRs (19 deals / $12.7B = 59% of dropped
+      notional)**: Chinese (JD $3.6B, FUTU $1.7B, TCOM
+      $1.2B, BILI, BEKE, GDS, XPEV), Brazilian (LTM $3.7B —
+      LATAM Airlines, 6 deals), and others. These are a
+      *structural* refs filter, not survivorship.
+    - **Known M&A / private completions (16 deals / $3.3B)**:
+      ALIT, CYBR, DNB, PYCR, MLNK, CIVI, PTLO, ODD, OS.
+      True survivorship — these existed at trade time but
+      are gone now.
+    - **Small / delisted (24 deals / $5.5B)**: CCCS (8 deals,
+      $2.7B), FWRG, QDEL, BMBL, etc. Mostly fell below the
+      $1B mkt-cap floor or were quietly delisted.
+  - **35 deals** dropped by block_trades sanity filters
+    (no pre-close, premium prices, |discount| > 15%).
+  - **33 deals** dropped by `MIN_DEAL_SIZE` ($100M floor —
+    many are clear data errors with `shares` mis-recorded
+    by 10× / 100×).
+  - **2 deals** exceed `MAX_XADV` (CMPR 56×, IAUX 51×).
+
+  **True survivorship is ~5-6% of source notional** (the
+  M&A + small/delisted cohorts = $8.8B / $164B), not the
+  13.4% headline number from `survivorship_check.py`.
+  Foreign-ADR exclusion is a structural design choice and
+  shouldn't be counted as survivorship. 296 trades remain
+  at the 20d window after all filters.
 - **P&L concentration in right-tail outliers.** Top 10
   trades = 104% of total P&L (top 20 = 141%). Removing top
   10 collapses Sharpe from 1.61 → ~0.4. Half of trades have
