@@ -185,7 +185,7 @@ penalized, never skipped.
   stop-loss + sizing rules systematically would multiply the
   sweep space considerably.
 - **No risk parity / vol scaling.** All trades use the same
-  base notional (clamped by $20-100M). Lower-vol names are
+  base notional (clamped by $10-100M). Lower-vol names are
   effectively over-weighted in dollar terms. A vol-adjusted
   sizer would shift the mix toward the higher-vol cohort
   where the chase_d10 archetype concentrates.

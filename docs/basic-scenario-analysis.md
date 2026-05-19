@@ -126,7 +126,7 @@ window the average comes out to ~67% of horizon VaR.
 ### Portfolio aggregation
 
 - **Independent positions**: each trade gets its own
-  $20-100M sizing. No global capital base in v0.
+  $10-100M sizing. No global capital base in v0.
 - **Gross GMV**: each position contributes
   `long_notional + |hedge_notional|` to GMV — both the long
   target and the short basket leg count, since both consume
@@ -169,7 +169,7 @@ on the curated alt block-trades dataset).
 | 10d | 331 | $43M | +0.93% | +0.74% | +2.84% | 51% | 53 |
 | 20d | 327 | $43M | +1.62% | +1.35% | +2.83% | 50% | 87 |
 
-Notional averages $43M — between the $20M floor and $100M cap,
+Notional averages $43M — between the $10M floor and $100M cap,
 so the sizer is rarely clipping. ADV-scaled is the binding cut.
 
 ### Monthly rollup (window=20d)
