@@ -6,14 +6,26 @@ dollar fields scale linearly with notional, so we can adjust
 notional per-trade and reaggregate without rerunning scoring.
 
 Strategy primitives (each maps a trade row → multiplier):
-  baseline      : 1.0 (no filter)
-  half_bad_bank : 0.5 if broker in {MS, BAC, BAML, JPM} else 1.0
-  skip_bad_bank : 0.0 if bad bank, else 1.0
-  skip_panic    : 0.0 if pre_1d ≤ -5% (severe same-day drop)
-  skip_deep     : 0.0 if discount ≤ -5%
-  skip_xadv     : 0.0 if shares_pct_adv > 5.0
-  chase_d10     : 1.5x if pre_20d > +5% AND pre_1d > -2%
-  combo_*       : compositions of the above
+
+Flow signals:
+  baseline           : 1.0 (no filter)
+  skip_panic         : 0.0 if pre_1d ≤ -5% (severe same-day drop)
+  skip_deep_disc     : 0.0 if discount ≤ -5%
+  skip_high_xadv     : 0.0 if shares_pct_adv > 5.0
+  chase_d10          : 1.5x if pre_20d > +5% AND pre_1d > -2%
+
+Bank signals:
+  half_bad_bank      : 0.5 for {MS, BAC, BAML, JPM}
+  skip_bad_bank      : 0.0 for bad banks
+
+Sector signals (from block-alpha-drivers.md sector lens):
+  half_bad_sector    : 0.5 for {Energy, Real Estate}
+  quarter_bad_sector : 0.25 for {Energy, Real Estate}
+  skip_tail_sector   : 0.0 for {Comm Services, Utilities}
+  chase_good_sector  : 1.5 for {Cons Disc, Industrials}
+  (IT is intentionally excluded — too diverse to penalize.)
+
+Combos: any product of the above.
 
 Usage:
     uv run python tools/portfolio_strategy_sweep.py
@@ -48,6 +60,24 @@ DOLLAR_COLS = [
 ]
 
 BAD_BANKS = {'MS', 'BAC', 'BAML', 'JPM'}
+
+# Sectors from block-alpha-drivers.md sector lens (20d hedged).
+# IT is excluded from penalties: too big and internally diverse
+# (semis / software / hardware / IT services all have different
+# block dynamics) to treat as a single bad cohort. Penalize only
+# the cleaner negative sectors. Skip only the tiny-n tail.
+BAD_SECTORS = {
+    'Energy',                  # n=51, hedged -0.83%
+    'Real Estate',             # n=27, hedged -0.84%
+}
+SKIPPABLE_SECTORS = {
+    'Communication Services',  # n=7,  hedged -3.39%
+    'Utilities',               # n=3,  hedged -3.34%
+}
+GOOD_SECTORS = {
+    'Consumer Discretionary',  # n=29, hedged +3.85%
+    'Industrials',             # n=57, hedged +2.51%
+}
 
 
 def baseline(r: dict) -> float:
@@ -90,6 +120,31 @@ def chase_d10(r: dict) -> float:
     return 1.0
 
 
+def half_bad_sector(r: dict) -> float:
+    """0.5x for Energy and Real Estate. IT is intentionally
+    excluded — too diverse (semis vs software vs services)
+    to treat as one cohort."""
+    return 0.5 if r.get('sector') in BAD_SECTORS else 1.0
+
+
+def quarter_bad_sector(r: dict) -> float:
+    """0.25x for Energy and Real Estate — heavier penalty,
+    same set."""
+    return 0.25 if r.get('sector') in BAD_SECTORS else 1.0
+
+
+def skip_tail_sector(r: dict) -> float:
+    """0.0x for the tail-loser sectors: Comm Services and
+    Utilities. Both have n < 10 and hedged P&L well below
+    −3% — small enough to drop entirely."""
+    return 0.0 if r.get('sector') in SKIPPABLE_SECTORS else 1.0
+
+
+def chase_good_sector(r: dict) -> float:
+    """1.5x for Cons Disc, Industrials (clean winning cohorts)."""
+    return 1.5 if r.get('sector') in GOOD_SECTORS else 1.0
+
+
 def _compose(*fns: Callable[[dict], float]) -> Callable[[dict], float]:
     def composed(r: dict) -> float:
         m = 1.0
@@ -101,21 +156,46 @@ def _compose(*fns: Callable[[dict], float]) -> Callable[[dict], float]:
 
 STRATEGIES: dict[str, Callable[[dict], float]] = {
     'baseline': baseline,
-    'half_bad_bank': half_bad_bank,
-    'skip_bad_bank': skip_bad_bank,
+    # single-axis rules
     'skip_panic': skip_panic,
-    'skip_deep_disc': skip_deep_disc,
-    'skip_high_xadv': skip_high_xadv,
     'chase_d10': chase_d10,
-    'half_bank+skip_panic': _compose(half_bad_bank, skip_panic),
-    'chase_d10+skip_panic': _compose(chase_d10, skip_panic),
-    'chase_d10+half_bad_bank': _compose(chase_d10, half_bad_bank),
+    'half_bad_bank': half_bad_bank,
+    'half_bad_sector': half_bad_sector,
+    'quarter_bad_sector': quarter_bad_sector,
+    'skip_tail_sector': skip_tail_sector,
+    'chase_good_sector': chase_good_sector,
+    # 2-axis sector + flow combos
+    'chase_d10+half_sector': _compose(chase_d10, half_bad_sector),
+    'chase_d10+skip_tail': _compose(chase_d10, skip_tail_sector),
+    'chase_d10+chase_good_sector': _compose(
+        chase_d10, chase_good_sector,
+    ),
+    'skip_panic+half_sector': _compose(
+        skip_panic, half_bad_sector,
+    ),
+    # 3-axis combos (best from prior sweep + sector)
     'chase_d10+half_bank+skip_panic': _compose(
         chase_d10, half_bad_bank, skip_panic,
     ),
-    'chase_d10+skip_bad_bank': _compose(chase_d10, skip_bad_bank),
-    'all_skips': _compose(
-        skip_bad_bank, skip_panic, skip_deep_disc, skip_high_xadv,
+    'chase_d10+skip_panic+half_sector': _compose(
+        chase_d10, skip_panic, half_bad_sector,
+    ),
+    'chase_d10+skip_panic+quarter_sector': _compose(
+        chase_d10, skip_panic, quarter_bad_sector,
+    ),
+    'chase_d10+skip_panic+chase_good_sector': _compose(
+        chase_d10, skip_panic, chase_good_sector,
+    ),
+    # 4-axis combos — full stack
+    'chase_d10+half_bank+skip_panic+half_sector': _compose(
+        chase_d10, half_bad_bank, skip_panic, half_bad_sector,
+    ),
+    'chase_d10+half_bank+skip_panic+chase_good_sector': _compose(
+        chase_d10, half_bad_bank, skip_panic, chase_good_sector,
+    ),
+    'chase_d10+half_bank+skip_panic+sector_full': _compose(
+        chase_d10, half_bad_bank, skip_panic,
+        half_bad_sector, chase_good_sector, skip_tail_sector,
     ),
 }
 
@@ -137,6 +217,16 @@ def load_with_features() -> pl.DataFrame:
     pos = pos.join(
         trades_unique, on=['symbol', 'trade_date'], how='left'
     )
+
+    # Sector from latest refs (g_sector → sector)
+    refs_path = sorted(Path('data').glob('refs.*.parquet'))[-1]
+    refs = pl.read_parquet(refs_path).select([
+        pl.col('symbol'),
+        pl.col('g_sector').alias('sector'),
+    ])
+    if 'sector' in pos.columns:
+        pos = pos.drop('sector')
+    pos = pos.join(refs, on='symbol', how='left')
 
     # Pre-1d and pre-20d from scores
     scores = pl.read_parquet('data/backtest_scores.parquet').filter(
