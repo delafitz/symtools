@@ -22,40 +22,31 @@ notional_$ = clip(pct_adv × adv_usd_30d, floor, cap)
 | `floor` | $10M |
 | `cap` | $100M |
 | `var_cap_usd` | **$50M** (soft cap on hedged 99% VaR @ 20d) |
+| `deal_pct` | **0.30** (max position as fraction of deal size) |
 
 ADV is the 30-day trailing average dollar volume at trade
 date, taken from `backtest_trades.parquet`. With these defaults
-the average target notional is **$26.5M** (median $13.9M; ~39%
-of trades hit the floor for small-ADV names, ~7% hit the
-$100M cap).
+the average target notional is **$20.5M** (median $13.5M; ~40%
+of trades hit the floor for small-ADV names, ~1% hit the
+$100M cap; ~4% are clipped by the 30%-of-deal cap).
 
 The **$50M VaR cap** is a soft risk-mgmt guardrail. It clips
 notional further only on positions whose implied hedged
 20d VaR exceeds $50M — typically extreme-vol names
-(vol_90d > 90%). At the current configuration it touches
-~2 of 327 trades. Tightening the cap to $20-30M
-materially erodes return (the high-vol cohort is where
-the right-tail alpha lives — see VaR cap sensitivity below).
+(vol_90d > 90%). On the cleaned population the cap is
+nearly inactive; tightening below $30M starts to materially
+erode return.
+
+The **30% deal-size cap** reflects that you can't take more
+of the block than the broker is selling. It binds on ~12
+trades in the current population (notably RDDT at 79%
+pre-cap, WBD at 75%, PM at 60%).
 
 The sweep tool (see `tools/portfolio_sizing_sweep.py`) shows the
 strategy is capacity-insensitive across a 4× notional range —
-annualized return stays at ~15% from `pct_adv=0.10` through
+annualized return stays near ~11% from `pct_adv=0.10` through
 `pct_adv=0.40` — so the default is set on the small end for
 realism rather than max scale.
-
-### VaR-cap sensitivity
-
-Tightening the VaR cap monotonically erodes both return and
-Sharpe — high-vol names are where the right-tail alpha sits,
-and the cap punishes them in proportion to their vol:
-
-| var_cap | avg_size | avg_GMV | avg_VaR_h | PnL_mo | ann_ret | Sharpe |
-|---|---|---|---|---|---|---|
-| none | $26.5M | $466M | $40M | +$5.36M | +15.9% | +1.88 |
-| **$50M (default)** | $26.4M | $465M | $39M | +$5.22M | +15.7% | +1.86 |
-| $30M | $25.9M | $458M | $38M | +$4.88M | +15.2% | +1.78 |
-| $20M | $24.5M | $435M | $35M | +$3.99M | +13.9% | +1.71 |
-| $10M | $21.4M | $382M | $29M | +$2.78M | +12.1% | +1.67 |
 
 The $50M default is a soft guardrail — clips only the 2 most
 extreme-vol positions (rddt 2024-11-22 vol 93%, app 2024-11-22
@@ -158,46 +149,35 @@ window the average comes out to ~67% of horizon VaR.
 
 ## Results — all blocks
 
-n=331 hedgeable trades across 28-29 months (Jan-2024 → Apr-2026
-on the curated alt block-trades dataset).
-
-### Per-trade summary
-
-| window | n | avg notional | avg ret unhedged | avg ret hedged | avg exp hedged | hedged hit | n stops |
-|---|---|---|---|---|---|---|---|
-| 5d | 331 | $43M | +0.07% | −0.03% | +2.84% | 49% | 14 |
-| 10d | 331 | $43M | +0.93% | +0.74% | +2.84% | 51% | 53 |
-| 20d | 327 | $43M | +1.62% | +1.35% | +2.83% | 50% | 87 |
-
-Notional averages $43M — between the $10M floor and $100M cap,
-so the sizer is rarely clipping. ADV-scaled is the binding cut.
+n=296 hedgeable trades across 28-29 months (Jan-2024 → Apr-2026
+on the curated alt block-trades dataset). Sub-$100M deals and
+xADV>30 outliers are filtered (see `tools/backtest.py` for the
+MIN_DEAL_SIZE / MAX_XADV thresholds). Positions are capped at
+30% of deal size (you can't take more of the block than the
+broker is selling).
 
 ### Monthly rollup (window=20d)
 
 Headline numbers across 29 months (net of 10 bps × 4 sides
 transaction costs, with hedged-P&L stop at −8%, $50M VaR cap,
-portfolio VaR at ρ=0.3):
+30% deal-size cap, portfolio VaR at ρ=0.3):
 
 | metric | value |
 |---|---|
-| avg trade size (target) | $26.5M |
-| avg daily long GMV | $259M |
-| avg daily hedge GMV | $206M |
-| **avg daily gross GMV** | **$465M** |
-| peak daily gross GMV | ~$1.1B |
-| avg daily sum-of-VaRs (hedged, ρ=1) | $39.2M |
-| avg daily portfolio VaR (ρ=0.30) | **$26.2M** |
-| portfolio VaR / gross GMV | 5.6% (was 8.4% under sum-of-VaR) |
+| **avg daily gross GMV** | **$378M** |
+| avg daily sum-of-VaRs (hedged, ρ=1) | $31.1M |
+| avg daily portfolio VaR (ρ=0.30) | **$21.0M** |
+| portfolio VaR / gross GMV | 5.6% |
 | diversification benefit at ρ=0.3 | ~33% of sum-of-VaR |
-| avg monthly P&L hedged | **+$5.2M** |
-| avg monthly ret on gross | +1.31% |
-| **annualized return on gross** | **+15.7%** |
-| Sharpe (hedged, annualized) | **+1.86** |
-| n_stops triggered (20d) | ~57 |
+| avg monthly P&L hedged | **+$1.8M** |
+| avg monthly ret on gross | +0.95% |
+| **annualized return on gross** | **+11.4%** |
+| Sharpe (hedged, annualized) | **+1.48** |
+| n_stops triggered (20d) | ~52 |
 
 **Diversification band**: at ρ=0.1 (highly orthogonal
-hedged residuals) portfolio VaR is **$20.9M (53% of sum)**;
-at ρ=0.5 (correlated stress regime) it is **$30.5M (78% of
+hedged residuals) portfolio VaR is **$16.9M (54% of sum)**;
+at ρ=0.5 (correlated stress regime) it is **$24.4M (78% of
 sum)**. The default ρ=0.3 sits between these as the
 conservative-realistic middle.
 
@@ -207,9 +187,9 @@ stop at −8%):
 
 | window | avg trade size | avg daily pos | avg daily gross GMV | peak daily gross GMV | avg daily VaR (hed) | VaR/Gross | avg monthly P&L hedged | avg monthly ret | annualized |
 |---|---|---|---|---|---|---|---|---|---|
-| 5d | $26.5M | 3.3 | $146M | ~$480M | $7M | 4.5% | −$1.0M | −0.65% | **−7.7%** |
-| 10d | $26.5M | 5.6 | $254M | ~$760M | $16M | 6.2% | +$2.5M | +0.74% | **+8.9%** |
-| **20d** | $26.5M | **9.4** | **$466M** | **$1.37B** | **$40M** | **8.5%** | **+$5.4M** | **+1.33%** | **+15.9%** |
+| 5d | $23.9M | 2.9 | $123M | ~$587M | $6M | 4.6% | −$1.5M | −1.35% | **−16.2%** |
+| 10d | $23.9M | 5.0 | $210M | ~$804M | $13M | 6.1% | +$0.4M | +0.25% | **+3.0%** |
+| **20d** | $23.9M | **8.9** | **$378M** | **~$1.09B** | **$31M** | **8.2%** | **+$1.8M** | **+0.95%** | **+11.4%** |
 
 Avg trade size (target leg) is ~$43M and avg hedge notional
 is ~$34M, so each position runs **~$77M gross** ($43M long
@@ -316,15 +296,19 @@ Selected months showing realized vs expected divergence
   caps deployment, possibly skipping trades when overlimit.
   When added, expect avg_daily_GMV to compress and
   return-on-capital to clarify.
-- **Survivorship bias.** The source file holds 440 deals; 59
-  trades (13.4%, $21.5B notional) are dropped because their
-  tickers are not in our current refs universe. These are
-  mostly M&A targets (CIVI, DNB, BMBL), foreign ADRs we
-  filter out (BILI, BEKE, JD, FUTU), and small-caps below
-  our mkt_cap threshold. Run `tools/survivorship_check.py`
-  to enumerate. The remaining 327 trades are implicitly
-  conditioned on surviving to today; outcomes on the
-  dropped cohort are unknown.
+- **Survivorship + data-quality filters.** The source file
+  holds 440 deals; 34 are dropped because their tickers are
+  not in our current refs universe (mostly M&A targets:
+  CIVI, DNB, BMBL; foreign ADRs: BILI, BEKE, JD, FUTU;
+  sub-threshold mkt cap). A further ~35 are dropped by
+  block_trades sanity filters (no pre-close, premium prices,
+  |discount| > 15%). 33 trades fall under `MIN_DEAL_SIZE`
+  ($100M floor — many are clear data errors with `shares`
+  field mis-recorded by factor of 10×/100×) and 2 trades
+  exceed `MAX_XADV` (CMPR at 56× and IAUX at 51× — half-of-
+  float crossings, not overnight blocks). 296 trades remain
+  at the 20d window. Run `tools/survivorship_check.py` to
+  enumerate the refs drops.
 - **P&L concentration in right-tail outliers.** Top 10
   trades = 104% of total P&L (top 20 = 141%). Removing top
   10 collapses Sharpe from 1.61 → ~0.4. Half of trades have
