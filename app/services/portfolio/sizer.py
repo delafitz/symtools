@@ -23,6 +23,13 @@ class SizeParams:
     # cost while bounding single-position tail risk.
     var_cap_usd: float | None = 50_000_000
     var_horizon_days: int = 20
+    # Max position as a fraction of the actual block size.
+    # You can't buy more than what the broker is selling; in
+    # practice institutional allocations rarely exceed 30% of
+    # a deal. Default 0.30. Caps ~4% of trades in the current
+    # population (notably RDDT at 79%, WBD at 75%, PM at 60%).
+    # Pass deal_size_usd to size_position() to apply.
+    deal_pct: float = 0.30
 
 
 def size_position(
@@ -31,6 +38,7 @@ def size_position(
     *,
     vol_90d_annual_pct: float | None = None,
     corr: float | None = None,
+    deal_size_usd: float | None = None,
 ) -> float:
     """Notional $ for one position.
 
@@ -38,6 +46,10 @@ def size_position(
     `params.var_cap_usd` is set, also requires `vol_90d` (and
     optionally `corr`) to apply the VaR-based cap; if those
     are missing, the VaR cap is silently skipped.
+
+    When `deal_size_usd` is provided, the position is also
+    capped at `params.deal_pct × deal_size_usd` — you can't
+    take more of the block than the broker is selling.
     """
     if not adv_usd or adv_usd <= 0:
         return 0.0
@@ -59,5 +71,8 @@ def size_position(
                 * Z_99
             )
             notional = min(notional, max_n)
+
+    if deal_size_usd and deal_size_usd > 0:
+        notional = min(notional, params.deal_pct * deal_size_usd)
 
     return max(0.0, notional)

@@ -191,6 +191,7 @@ def run(
             size_params,
             vol_90d_annual_pct=vol,
             corr=rho,
+            deal_size_usd=tr.get('deal_size'),
         )
         if notional <= 0:
             skipped['no_size'] += 1
