@@ -53,6 +53,13 @@ SCORES_OUT = Path('data/backtest_scores.parquet')
 
 VOL_WINDOW = 90    # days for trailing annualized vol
 ADV_WINDOW = 30    # days for trailing avg daily volume
+# Drop trades whose block size exceeds MAX_XADV days of typical
+# volume. These are structurally different from overnight
+# blocks — half-of-float / multi-month-volume crossings in
+# thinly-traded names — and distort liquidity-bucket stats.
+# At threshold=30, two trades are removed (CMPR 2024-02-06 at
+# 56x and IAUX 2025-05-09 at 51x). Next-highest is SHC at 23x.
+MAX_XADV = 30.0
 # Multiplier applied to the basket β when scoring hedged
 # returns. 200d β is empirically ~15% high vs realized forward
 # β; this haircut hits min-var at 5/10/20d post horizons.
@@ -498,6 +505,14 @@ def main() -> None:
             chars = trade_characteristics(
                 sym, td, hists, refs_row, shares, offer_price
             )
+
+            xadv = chars.get('shares_pct_adv')
+            if xadv is not None and xadv > MAX_XADV:
+                log.warning(
+                    f'{i}/{len(trades)} {sym}@{td}: '
+                    f'xADV={xadv:.1f} > {MAX_XADV} — dropping'
+                )
+                continue
 
             baskets: dict | None = None
             cache_tag = ''
