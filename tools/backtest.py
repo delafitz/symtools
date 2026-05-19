@@ -60,6 +60,13 @@ ADV_WINDOW = 30    # days for trailing avg daily volume
 # At threshold=30, two trades are removed (CMPR 2024-02-06 at
 # 56x and IAUX 2025-05-09 at 51x). Next-highest is SHC at 23x.
 MAX_XADV = 30.0
+# Drop trades below MIN_DEAL_SIZE. Source data has unit/typo
+# errors at the low end (e.g. FWONK at $0.01M, WDC at $0.03M,
+# NDAQ at $0.08M — all $20B+ mkt-cap names where micro-deals
+# can't be real overnight blocks). Even legitimate sub-$100M
+# trades are too small to size meaningfully under the
+# $10M floor / pct_adv sizer (notional often exceeds deal).
+MIN_DEAL_SIZE = 100_000_000
 # Multiplier applied to the basket β when scoring hedged
 # returns. 200d β is empirically ~15% high vs realized forward
 # β; this haircut hits min-var at 5/10/20d post horizons.
@@ -502,6 +509,15 @@ def main() -> None:
             )
             shares = trade.get('shares') or 0
             offer_price = trade.get('offer_price') or 0.0
+            deal_size = shares * offer_price
+            if deal_size < MIN_DEAL_SIZE:
+                log.warning(
+                    f'{i}/{len(trades)} {sym}@{td}: '
+                    f'deal=${deal_size/1e6:.1f}M < '
+                    f'${MIN_DEAL_SIZE/1e6:.0f}M — dropping'
+                )
+                continue
+
             chars = trade_characteristics(
                 sym, td, hists, refs_row, shares, offer_price
             )
