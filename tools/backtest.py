@@ -74,10 +74,15 @@ MAX_XADV = 30.0
 # trades are too small to size meaningfully under the
 # $10M floor / pct_adv sizer (notional often exceeds deal).
 MIN_DEAL_SIZE = 100_000_000
-# Multiplier applied to the basket β when scoring hedged
-# returns. 200d β is empirically ~15% high vs realized forward
-# β; this haircut hits min-var at 5/10/20d post horizons.
-HEDGE_RATIO = 0.85
+# Hedge ratio applied to the basket β when scoring hedged
+# returns. Synced with DEFAULT_HEDGE_RATIO in
+# app/services/portfolio/position.py so the score-time and
+# sim-time hedge ratios always match. See that file for the
+# rationale behind 0.60 (portfolio-Sharpe optimum on the
+# cleaned 296-trade population).
+from app.services.portfolio.position import (
+    DEFAULT_HEDGE_RATIO as HEDGE_RATIO,
+)
 # Calendar days of history fed to Barra before the as-of week.
 # Barra needs MOM_WINDOW (250 trading days) of pre-history to
 # compute exposures, plus MIN_HIST (250) factor return
