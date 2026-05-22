@@ -191,6 +191,52 @@ basket short, combined scenario.*
   most of the discount cushion after the hedge; the mean is
   positive because the right tail compensates.
 
+### Summary feature — Path Persistence (T+5 signal)
+
+The sign of hedged return at T+5 is a strong predictor of
+T+20 outcome. Trades that are negative at T+5 tend to keep
+losing; trades that are positive tend to keep winning.
+
+**Single-checkpoint (T+5 sign):**
+
+| signal | n | %pop | mean h20 | median h20 | hit_h20 |
+|---|---|---|---|---|---|
+| **h5 < 0** | 153 | 52% | **−2.96%** | −2.47% | **33%** |
+| **h5 ≥ 0** | 143 | 48% | **+4.86%** | +3.60% | **74%** |
+
+**Two-checkpoint (T+1 AND T+5 sign):**
+
+| signal | n | %pop | mean h20 | median h20 | hit_h20 |
+|---|---|---|---|---|---|
+| h1 < 0 AND h5 < 0 | 124 | 42% | **−4.08%** | −3.31% | 30% |
+| mixed | 63 | 21% | +2.90% | +2.70% | 60% |
+| h1 ≥ 0 AND h5 ≥ 0 | 109 | 37% | **+5.19%** | +3.80% | 75% |
+
+**Quintile by h5 (continuous):**
+
+| h5 bucket | n | mean h5 | **mean h20** | hit_h20 |
+|---|---|---|---|---|
+| Q1 (worst) | 59 | −7.2% | **−5.81%** | 22% |
+| Q2 | 59 | −2.3% | −2.10% | 37% |
+| Q3 | 59 | −0.3% | +0.30% | 51% |
+| Q4 | 59 | +2.0% | +3.01% | 69% |
+| Q5 (best) | 60 | +6.8% | **+8.55%** | 85% |
+
+**Why we still hold the early losers**: this signal looks
+actionable but the −8% hedged stop already captures the
+worst tail (Q1's h5 ≈ −7% is right at the stop boundary).
+For the middle-loser zone (h5 = −5% to 0%), exiting at T+5
+truncates trades that *would have* recovered — testing the
+rule "exit T+5 if h5 < 0" reduces variance but doesn't lift
+mean (Sharpe per-trade rises +0.10 with a median ~1.4pp
+worse). The −8% stop is the right level of intervention; the
+T+5 sign is informative but not actionable on its own.
+
+This signal is most useful for **monitoring / risk
+attribution** ("how is the portfolio shaping up at T+5") and
+as the natural data foundation for any future
+**path-dependent take-profit / trailing-stop research**.
+
 ### Monthly rollup (window=20d)
 
 Headline numbers across 29 months (net of 10 bps × 4 sides
