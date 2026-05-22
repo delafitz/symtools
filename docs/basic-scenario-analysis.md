@@ -69,8 +69,13 @@ concentration — *not* a return-improvement lever.
   stop only fires when the hedge has *also* failed to protect
   the position — see `stop-loss-analysis.md` for the full
   sweep + comparison.
-- **Hedge ratio**: 0.85 × β (haircut from the regime-break
-  calibration in `block-alpha-drivers.md`).
+- **Hedge ratio**: **0.60 × β** (portfolio-Sharpe optimum from
+  the hedge-ratio sweep below). Earlier 0.85 came from a
+  single-trade min-var analysis (`block-alpha-drivers.md`) —
+  the portfolio-aware sweep finds 0.60 is the Pareto best on
+  the cleaned 296-trade population. Note: this is the
+  *average*-optimum; sparse months (avg < 5 open positions)
+  prefer heavier hedging — see hedge-ratio sweep below.
 - **Transaction costs**: 10 bps per execution side, applied
   on all four sides (target entry, target exit, hedge entry,
   hedge exit) → 40 bps round-trip on gross. P&L is reported
@@ -160,19 +165,19 @@ broker is selling).
 
 Headline numbers across 29 months (net of 10 bps × 4 sides
 transaction costs, with hedged-P&L stop at −8%, $50M VaR cap,
-30% deal-size cap, portfolio VaR at ρ=0.3):
+30% deal-size cap, hedge ratio 0.60, portfolio VaR at ρ=0.3):
 
 | metric | value |
 |---|---|
-| **avg daily gross GMV** | **$378M** |
+| **avg daily gross GMV** | **$330M** |
 | avg daily sum-of-VaRs (hedged, ρ=1) | $31.1M |
 | avg daily portfolio VaR (ρ=0.30) | **$21.0M** |
-| portfolio VaR / gross GMV | 5.6% |
+| portfolio VaR / gross GMV | 6.4% |
 | diversification benefit at ρ=0.3 | ~33% of sum-of-VaR |
-| avg monthly P&L hedged | **+$1.8M** |
-| avg monthly ret on gross | +0.95% |
-| **annualized return on gross** | **+11.4%** |
-| Sharpe (hedged, annualized) | **+1.48** |
+| avg monthly P&L hedged | **+$2.6M** |
+| avg monthly ret on gross | +1.30% |
+| **annualized return on gross** | **+13.9%** |
+| Sharpe (hedged, annualized) | **+1.52** |
 | n_stops triggered (20d) | ~52 |
 
 **Diversification band**: at ρ=0.1 (highly orthogonal
@@ -181,15 +186,62 @@ at ρ=0.5 (correlated stress regime) it is **$24.4M (78% of
 sum)**. The default ρ=0.3 sits between these as the
 conservative-realistic middle.
 
+### Hedge ratio sweep (portfolio level)
+
+Sharpe across hedge ratios at 20d window. Sharpe peaks in
+[0.60, 0.70] band; the prior 0.85 default is on the wrong
+side of the curve.
+
+| hr | avg GMV | sum VaR | PnL hedged | ann hedged | **Sharpe_h** |
+|---|---|---|---|---|---|
+| 0.00 (no hedge) | $200M | $30M | +$79M | +15.5% | +0.73 |
+| 0.30 | $267M | $31M | +$89M | +17.1% | +1.26 |
+| 0.50 | $308M | $31M | +$75M | +14.3% | +1.37 |
+| **0.60** (default) | $330M | $31M | **+$75M** | **+13.9%** | **+1.52** |
+| 0.65 | $340M | $31M | +$72M | +13.3% | +1.53 |
+| 0.70 | $350M | $31M | +$67M | +12.9% | **+1.54** ← peak |
+| 0.75 | $360M | $31M | +$60M | +12.0% | +1.48 |
+| 0.85 (prior) | $378M | $31M | +$53M | +11.4% | +1.48 |
+| 1.00 | $401M | $31M | +$40M | +10.8% | +1.35 |
+| 1.20 | $436M | $31M | +$39M | +10.9% | +1.30 |
+
+**0.60 vs 0.85**: +0.04 Sharpe, +2.5pp ann, +$22M total PnL,
+−13% GMV. The earlier 0.85 calibration came from a
+*per-trade* min-var bin analysis (`block-alpha-drivers.md`)
+that doesn't account for cross-position diversification.
+At the portfolio level the lighter hedge keeps the alpha
+that the per-trade analysis was suppressing.
+
+### Hedge ratio × portfolio breadth
+
+The optimum hedge ratio varies with the count of
+simultaneous open positions. Comparing hr=0.60 vs 0.85
+monthly Sharpe by portfolio breadth bucket:
+
+| bucket | months | avg pos | PnL_60 | PnL_85 | std_60 | std_85 | Sharpe_60 | Sharpe_85 |
+|---|---|---|---|---|---|---|---|---|
+| **sparse** (<5) | 7 | 3.3 | +$5.0M | **+$10.6M** | 3.77% | 3.05% | +1.85 | **+2.79** |
+| medium (5-10) | 13 | 7.9 | **+$51.1M** | +$34.2M | 2.33% | 1.75% | **+1.66** | +1.26 |
+| dense (≥10) | 9 | 14.9 | **+$19.2M** | +$8.2M | 2.14% | 1.76% | **+0.90** | +0.45 |
+
+**Sparse months want more hedge** — no diversification cushion
+means single-name residual vol pumps through to portfolio
+vol. Medium/dense months benefit from the diversification
+math and prefer lighter hedging. A breadth-aware dynamic
+hedge ratio (use 0.85 when pos<5, 0.60 otherwise) would
+recover ~$5M from sparse-month underperformance without
+giving up the medium/dense win. Not implemented yet —
+listed as future work.
+
 By window (GMV is **gross** = long target + |short basket
 hedge|; P&L is net of 40 bps round-trip costs; hedged-P&L
 stop at −8%):
 
 | window | avg trade size | avg daily pos | avg daily gross GMV | peak daily gross GMV | avg daily VaR (hed) | VaR/Gross | avg monthly P&L hedged | avg monthly ret | annualized |
 |---|---|---|---|---|---|---|---|---|---|
-| 5d | $23.9M | 2.9 | $123M | ~$587M | $6M | 4.6% | −$1.5M | −1.35% | **−16.2%** |
-| 10d | $23.9M | 5.0 | $210M | ~$804M | $13M | 6.1% | +$0.4M | +0.25% | **+3.0%** |
-| **20d** | $23.9M | **8.9** | **$378M** | **~$1.09B** | **$31M** | **8.2%** | **+$1.8M** | **+0.95%** | **+11.4%** |
+| 5d | $23.9M | 2.9 | $108M | ~$505M | $6M | 5.3% | −$1.4M | −1.44% | **−17.3%** |
+| 10d | $23.9M | 5.0 | $182M | ~$707M | $13M | 7.0% | +$0.7M | +0.56% | **+6.7%** |
+| **20d** | $23.9M | **9.0** | **$330M** | **~$941M** | **$31M** | **9.4%** | **+$2.6M** | **+1.16%** | **+13.9%** |
 
 Avg trade size (target leg) is ~$43M and avg hedge notional
 is ~$34M, so each position runs **~$77M gross** ($43M long

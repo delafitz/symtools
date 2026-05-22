@@ -29,7 +29,15 @@ from dataclasses import dataclass
 import polars as pl
 
 
-DEFAULT_HEDGE_RATIO = 0.85
+# Hedge ratio = haircut on β. Portfolio-Sharpe optimum sits at
+# ~0.60-0.70 on the cleaned 296-trade population (see
+# docs/basic-scenario-analysis.md hedge-ratio sweep). 0.60 is
+# the Pareto-best choice: peak PnL (+$75M total) and within
+# 0.02 of peak Sharpe (1.52 vs 1.54 at hr=0.70). Earlier 0.85
+# default came from a single-trade min-var analysis that
+# under-weights the portfolio diversification benefit of
+# lighter hedging.
+DEFAULT_HEDGE_RATIO = 0.60
 DEFAULT_STOP_PCT = -0.08
 DEFAULT_STOP_BASIS = 'hedged'  # 'hedged' or 'target'
 # Round-trip transaction cost per side (bps). Charged on

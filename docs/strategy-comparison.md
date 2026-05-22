@@ -9,9 +9,10 @@ baseline portfolio backtest. Builds on
 
 Population: 296 hedgeable trades from the alt dataset, 20d
 window (deals ≥$100M, xADV ≤30). Sizing: pct_adv=0.15,
-floor=$10M, cap=$100M, deal_pct=0.30, hedge ratio=0.85,
-stop=−8% (hedged-P&L basis), cost=10 bps × 4 sides (40 bps
-round-trip on gross). All P&L numbers are **net of costs**.
+floor=$10M, cap=$100M, deal_pct=0.30, hedge ratio=0.60
+(portfolio-Sharpe optimum), stop=−8% (hedged-P&L basis),
+cost=10 bps × 4 sides (40 bps round-trip on gross). All
+P&L numbers are **net of costs**.
 
 Per-trade rules return a multiplier in `[0.0, 1.5]` applied
 to the base notional:
@@ -44,43 +45,43 @@ multiplier; pct fields are invariant. Implementation in
 
 | strategy | n | avg_GMV | avg_VaR | **PnL_mo** | mo_ret | **ann_ret** | **sharpe_h** |
 |---|---|---|---|---|---|---|---|
-| baseline | 296 | $378M | $31M | +$2M | +0.95% | +11.4% | +1.48 |
-| skip_panic | 250 | $339M | $26M | +$3M | +1.38% | +16.5% | +1.84 |
-| chase_d10 | 296 | $432M | $36M | +$3M | +1.14% | +13.7% | +1.59 |
-| half_bad_bank | 296 | $286M | $24M | +$2M | +1.17% | +14.0% | +1.52 |
-| half_bad_sector | 296 | $351M | $30M | +$2M | +0.99% | +11.9% | +1.48 |
-| quarter_bad_sector | 296 | $337M | $29M | +$2M | +1.00% | +12.0% | +1.45 |
-| skip_tail_sector | 289 | $365M | $31M | +$1M | +0.82% | +9.8% | +1.09 |
-| chase_good_sector | 296 | $422M | $35M | +$2M | +1.08% | +12.9% | +1.51 |
-| chase_d10+half_sector | 296 | $399M | $34M | +$3M | +1.19% | +14.2% | +1.60 |
-| chase_d10+chase_good_sector | 296 | $482M | $41M | +$4M | +1.28% | +15.4% | +1.62 |
-| **skip_panic+half_sector** | **250** | **$312M** | **$25M** | **+$3M** | **+1.47%** | **+17.7%** | **+1.92** |
-| chase_d10+half_bank+skip_panic | 250 | $296M | $24M | +$3M | +1.84% | +22.1% | +1.80 |
-| **chase_d10+skip_panic+half_sector** | **250** | **$360M** | **$30M** | **+$4M** | **+1.64%** | **+19.7%** | **+1.93** |
-| **chase_d10+skip_panic+quarter_sector** | **250** | **$344M** | **$29M** | **+$4M** | **+1.69%** | **+20.3%** | **+1.95** |
-| chase_d10+skip_panic+chase_good_sector | 250 | $436M | $35M | +$5M | +1.66% | +20.0% | +1.92 |
-| **chase_d10+half_bank+skip_panic+half_sector** | **250** | **$273M** | **$23M** | **+$4M** | **+1.94%** | **+23.3%** | **+1.88** |
-| **chase_d10+half_bank+skip_panic+chase_good_sector** | **250** | **$330M** | **$27M** | **+$4M** | **+2.01%** | **+24.1%** | **+1.89** |
-| chase_d10+half_bank+skip_panic+sector_full | 244 | $294M | $26M | +$4M | +1.93% | +23.2% | +1.72 |
+| baseline | 296 | $330M | $31M | +$3M | +1.16% | +13.9% | +1.52 |
+| skip_panic | 250 | $296M | $26M | +$3M | +1.68% | +20.1% | +1.89 |
+| chase_d10 | 296 | $377M | $36M | +$4M | +1.40% | +16.8% | +1.63 |
+| half_bad_bank | 296 | $249M | $24M | +$3M | +1.42% | +17.0% | +1.65 |
+| half_bad_sector | 296 | $306M | $30M | +$3M | +1.21% | +14.6% | +1.54 |
+| quarter_bad_sector | 296 | $294M | $29M | +$3M | +1.23% | +14.8% | +1.51 |
+| skip_tail_sector | 289 | $318M | $31M | +$2M | +0.98% | +11.8% | +1.11 |
+| chase_good_sector | 296 | $368M | $35M | +$3M | +1.34% | +16.0% | +1.63 |
+| chase_d10+half_sector | 296 | $348M | $34M | +$4M | +1.46% | +17.5% | +1.66 |
+| chase_d10+chase_good_sector | 296 | $421M | $41M | +$5M | +1.59% | +19.1% | +1.73 |
+| **skip_panic+half_sector** | **250** | **$273M** | **$25M** | **+$3M** | **+1.80%** | **+21.6%** | **+1.99** |
+| chase_d10+half_bank+skip_panic | 250 | $258M | $24M | +$4M | +2.20% | +26.4% | +1.91 |
+| **chase_d10+skip_panic+half_sector** | **250** | **$315M** | **$30M** | **+$5M** | **+2.00%** | **+24.0%** | **+2.00** |
+| **chase_d10+skip_panic+quarter_sector** | **250** | **$301M** | **$29M** | **+$5M** | **+2.07%** | **+24.8%** | **+2.03** |
+| chase_d10+skip_panic+chase_good_sector | 250 | $381M | $35M | +$5M | +2.05% | +24.5% | +1.99 |
+| **chase_d10+half_bank+skip_panic+half_sector** | **250** | **$238M** | **$23M** | **+$4M** | **+2.35%** | **+28.2%** | **+2.02** |
+| **chase_d10+half_bank+skip_panic+chase_good_sector** | **250** | **$288M** | **$27M** | **+$5M** | **+2.43%** | **+29.2%** | **+2.02** |
+| chase_d10+half_bank+skip_panic+sector_full | 244 | $256M | $26M | +$4M | +2.32% | +27.8% | +1.82 |
 
 ## Findings
 
 ### Rules that work cleanly
 
 1. **`skip_panic` is the best single filter.** Cutting 46
-   trades with pre-1d ≤ −5% lifts Sharpe **1.48 → 1.84**
-   and lifts monthly P&L from +$2M to +$3M. The D1-archetype
-   "forced-seller into the print" cohort destroys value
-   without contributing. Pure noise reduction.
+   trades with pre-1d ≤ −5% lifts Sharpe **1.52 → 1.89**
+   and lifts monthly P&L from +$3M to nearly +$3M with much
+   less variance. The D1-archetype "forced-seller into the
+   print" cohort destroys value without contributing.
 
 2. **`chase_d10` is the best size-up rule.** Upsizing
    D10-archetype trades (strong pre-20d run-up + mild pre-1d
-   drawdown) by 1.5× lifts monthly P&L **+$2M → +$3M** at
-   Sharpe 1.59. Captures right-tail alpha without any skips.
+   drawdown) by 1.5× lifts monthly P&L from +$3M to +$4M
+   at Sharpe 1.63. Captures right-tail alpha without skips.
 
 3. **Sector half-sizing (Energy + Real Estate) adds Sharpe
    for free.** Layering `half_bad_sector` on top of
-   `chase_d10+skip_panic` lifts Sharpe **1.80 → 1.93** with
+   `chase_d10+skip_panic` lifts Sharpe **1.91 → 2.00** with
    no trade drops — alpha is hedged away in these high-corr
    sectors, so half-sizing them keeps the option without
    carrying the variance. **IT is intentionally excluded**
@@ -89,12 +90,12 @@ multiplier; pct fields are invariant. Implementation in
    one cohort.
 
 4. **`chase_d10+skip_panic+quarter_sector` is the new Sharpe
-   optimum.** Sharpe **1.95** at +20.3% annualized. Drops 46
+   optimum.** Sharpe **2.03** at +24.8% annualized. Drops 46
    panic trades, upsizes D10, quarter-sizes Energy/RE.
 
 5. **`chase_d10+half_bank+skip_panic+chase_good_sector` hits
-   the highest annualized.** Sharpe 1.89 at **+24.1%
-   annualized** on $330M GMV — capital-efficient choice.
+   the highest annualized.** Sharpe 2.02 at **+29.2%
+   annualized** on $288M GMV — capital-efficient choice.
 
 ### Three counter-intuitive results
 
@@ -120,10 +121,10 @@ multiplier; pct fields are invariant. Implementation in
 Most strategy lift comes from **upsizing winners**, not from
 **filtering losers**:
 
-- baseline: $2M/mo, Sharpe 1.48
-- skip_panic only: $3M/mo, Sharpe 1.84 (+0.36 Sharpe)
-- chase_d10 only: $3M/mo, Sharpe 1.59 (+0.11 Sharpe, +$1M/mo)
-- half_bad_sector only: $2M/mo, Sharpe 1.48 (no lift alone)
+- baseline: $3M/mo, Sharpe 1.52
+- skip_panic only: $3M/mo, Sharpe 1.89 (+0.37 Sharpe)
+- chase_d10 only: $4M/mo, Sharpe 1.63 (+0.11 Sharpe, +$1M/mo)
+- half_bad_sector only: $3M/mo, Sharpe 1.54 (no lift alone)
 
 The right tail of the return distribution carries the
 strategy. Skipping the left tail tightens variance but
@@ -138,19 +139,19 @@ high-corr sectors where the hedge eats the alpha.
 Three clean choices depending on objective:
 
 ### Pure risk-adjusted optimum: `chase_d10+skip_panic+quarter_sector`
-- **Sharpe 1.95** (best in sweep)
-- Annualized **+20.3%** hedged
-- Avg daily GMV **$344M**
-- Monthly P&L **+$4M**
+- **Sharpe 2.03** (best in sweep)
+- Annualized **+24.8%** hedged
+- Avg daily GMV **$301M**
+- Monthly P&L **+$5M**
 - 250 trades (drops 46 panic; quarter-sizes Energy/RE; upsizes D10)
 
 ### Balanced: `chase_d10+skip_panic+half_sector`
-- Sharpe **+1.93**, ann **+19.7%**, P&L **+$4M/mo**, GMV $360M
+- Sharpe **+2.00**, ann **+24.0%**, P&L **+$5M/mo**, GMV $315M
 - Same combo with 0.5× sector penalty instead of 0.25×
 - Slightly higher GMV, very similar Sharpe
 
 ### Capital-efficient: `chase_d10+half_bank+skip_panic+chase_good_sector`
-- Sharpe **+1.89**, ann **+24.1%**, P&L **+$4M/mo**, GMV $330M
+- Sharpe **+2.02**, ann **+29.2%**, P&L **+$5M/mo**, GMV $288M
 - Half-sizes bad banks, upsizes Cons Disc + Industrials
 - **Highest annualized** in the high-Sharpe tier
 - Use when the limiting constraint is gross capital
