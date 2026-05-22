@@ -19,7 +19,7 @@ pre-positioning backtest.
 
 Usage:
     uv run python tools/backtest.py
-    uv run python tools/backtest.py --windows 1,5,20
+    uv run python tools/backtest.py --symbols pr,kntk
     uv run python tools/backtest.py --symbols AAPL,MSFT
     uv run python tools/backtest.py --limit 10
 """
@@ -46,7 +46,14 @@ from app.utils.logger import get_logger
 
 log = get_logger(__name__)
 
-DEFAULT_WINDOWS = (1, 5, 10, 20)
+# Pre-trade scoring windows (close-to-close drift before T).
+# Kept compact — the few cardinal horizons are sufficient for
+# pre-trade signal analysis.
+PRE_WINDOWS = (1, 5, 10, 20)
+# Post-trade scoring windows. Daily granularity (1..20) lets
+# us measure full P&L paths for dynamic-exit research and
+# trailing-stop / take-profit rule design.
+POST_WINDOWS = tuple(range(1, 21))
 CACHE_PATH = Path('data/backtest_baskets.parquet')
 TRADES_OUT = Path('data/backtest_trades.parquet')
 SCORES_OUT = Path('data/backtest_scores.parquet')
@@ -251,7 +258,6 @@ def score_trade(
     offer_price: float,
     hist_all: pl.DataFrame,
     baskets: dict,
-    windows: tuple[int, ...],
 ) -> list[dict]:
     """One row per (scenario, period, window).
 
@@ -275,8 +281,8 @@ def score_trade(
         if bc_entry is None or bc_entry <= 0:
             continue
 
-        for w in windows:
-            # PRE: close-to-close drift into the trade
+        # PRE: close-to-close drift into the trade
+        for w in PRE_WINDOWS:
             pr = pre_return(target_daily, trade_date, w)
             pb = pre_return(bc, trade_date, w)
             if pr is not None and pb is not None:
@@ -291,8 +297,10 @@ def score_trade(
                     'hedged_return': pr - HEDGE_RATIO * beta * pb,
                 })
 
-            # POST: offer_price → close(T+N) for target;
-            # close(T) → close(T+N) for basket
+        # POST: daily-granularity path from offer_price.
+        # target: close(T+N) / offer_price - 1
+        # basket: close(T+N) / close(T) - 1
+        for w in POST_WINDOWS:
             tgt_n = forward_close(target_daily, trade_date, w)
             b_n = forward_close(bc, trade_date, w)
             if tgt_n is None or b_n is None:
@@ -422,14 +430,11 @@ def build_trade_row(
 def main() -> None:
     args = sys.argv[1:]
 
-    windows = DEFAULT_WINDOWS
     symbols: set[str] | None = None
     limit: int | None = None
     while args:
         flag = args.pop(0)
-        if flag == '--windows':
-            windows = tuple(int(x) for x in args.pop(0).split(','))
-        elif flag == '--symbols':
+        if flag == '--symbols':
             symbols = {s.lower() for s in args.pop(0).split(',')}
         elif flag == '--limit':
             limit = int(args.pop(0))
@@ -458,10 +463,10 @@ def main() -> None:
     ).sort('trade_date_iso', descending=True)
 
     # Drop trades outside Y hist range (need >= MIN_TARGET_HIST bars
-    # before trade_date and at least max(windows)+1 bars after).
+    # before trade_date and at least max(POST_WINDOWS)+1 bars after).
     hist_min = hists.get_column('date').min()
     hist_max = hists.get_column('date').max()
-    max_window = max(windows)
+    max_window = max(POST_WINDOWS)
     n_before = len(trades)
     trades = trades.filter(
         (pl.col('trade_date_iso') > hist_min)
@@ -480,7 +485,10 @@ def main() -> None:
     if limit:
         trades = trades.head(limit)
 
-    log.info(f'backtesting {len(trades)} trades, windows={windows}')
+    log.info(
+        f'backtesting {len(trades)} trades, '
+        f'pre_windows={PRE_WINDOWS}, post_windows=range(1,21)'
+    )
 
     cache = load_basket_cache()
     ph = params_hash(None)
@@ -615,7 +623,7 @@ def main() -> None:
             score_rows: list[dict] = []
             if baskets:
                 score_rows = score_trade(
-                    sym, td, offer_price, hists, baskets, windows
+                    sym, td, offer_price, hists, baskets
                 )
                 results_scores.extend(score_rows)
 
