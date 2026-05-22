@@ -161,6 +161,36 @@ MIN_DEAL_SIZE / MAX_XADV thresholds). Positions are capped at
 30% of deal size (you can't take more of the block than the
 broker is selling).
 
+### Summary feature — Population Returns
+
+Headline life-cycle of a block from T−1 (the day before the
+print) through T+20 (final exit). Raw and hedged means and
+medians at each horizon.
+
+| stat | T−1 | T (disc) | T+1 | T+5 | T+10 | T+20 |
+|---|---|---|---|---|---|---|
+| raw mean | −1.66% | **−2.85%** | +0.04% | −0.07% | +0.98% | **+1.58%** |
+| raw median | −1.24% | −2.52% | −0.03% | −0.08% | +0.94% | +1.40% |
+| hedged mean | −1.72% | — | −0.04% | −0.16% | +0.72% | **+0.82%** |
+| hedged median | −1.24% | — | −0.16% | −0.21% | +0.56% | +0.32% |
+
+*T−1 = close-to-close raw return one day before trade; T =
+discount (offer_price / pre_close − 1); T+N = forward return
+from offer_price over N trading days. Hedged uses 0.60 × β
+basket short, combined scenario.*
+
+**Reading the table**:
+- **Sellers exploit pre-trade strength**: typical stock drops
+  −1.7% into the print (median), gets sold at a −2.5% discount
+  to that already-weakened close.
+- **Recovery is gradual**: T+1 / T+5 effectively flat. The
+  alpha builds T+8 → T+15 (mean peaks in this zone, see
+  daily-path data in `backtest_scores.parquet`).
+- **Mean-median gap at T+20 hedged** (+0.82% vs +0.32%):
+  right-tail-driven strategy. The median trade gives back
+  most of the discount cushion after the hedge; the mean is
+  positive because the right tail compensates.
+
 ### Monthly rollup (window=20d)
 
 Headline numbers across 29 months (net of 10 bps × 4 sides
