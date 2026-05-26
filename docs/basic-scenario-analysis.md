@@ -84,18 +84,25 @@ concentration — *not* a return-improvement lever.
   the uncapped book peaked at $937M GMV) — compresses worst-
   month drawdown 21% (−$34M → −$21M) while preserving 97% of
   monthly P&L.
-- **Strategy filter — bank cohort** (`app/services/portfolio/
-  filters.py`): per-trade notional multiplier passed to
-  `size_position(..., pre_clip_mult=...)` so the per-position
-  cap ($100M), deal_pct cap (30%), and VaR cap ($50M) all
-  still bind on upsized trades. Defaults: 0.5× for JPM and MS
-  (h20 hedged means of −0.9% and 0.0% respectively, n=53
-  combined), 1.5× for Citi (h20 +3.8%, n=37), 1.0× for
-  everyone else. Lifts portfolio Sharpe from +1.61 (defaults-
-  only) to +1.68. Most of the lift comes from the JPM/MS
-  shrink freeing GMV-cap headroom for other trades (n goes
-  265 → 273); chase_citi adds an additional +$0.20M monthly
-  P&L on top.
+- **Strategy filters** (`app/services/portfolio/filters.py`):
+  per-trade notional multipliers passed to `size_position(...,
+  pre_clip_mult=...)` so the per-position cap ($100M),
+  deal_pct cap (30%), and VaR cap ($50M) all still bind on
+  upsized trades.
+  - *Bank filter*: 0.5× for JPM and MS (h20 hedged means
+    −0.9% and 0.0%, n=53 combined), 1.5× for Citi (h20 +3.8%,
+    n=37), 1.0× for everyone else. Lifts Sharpe +1.61 →
+    +1.68. Most of the lift comes from JPM/MS shrink freeing
+    GMV-cap headroom for other trades (n goes 265 → 273);
+    chase_citi adds an additional +$0.20M monthly P&L on top.
+  - *Sector filter*: skip Real Estate (n=23, h20 −1.19%),
+    Health Care (n=14, h20 −1.30%), and Utilities (n=4, h20
+    −0.29%). Lifts Sharpe +1.68 → +1.75 at the cost of 37
+    dropped trades. **Tradeoff**: worst-month max DD widens
+    from −$20.9M to −$24.5M (Dec-2024) because the freed
+    GMV-cap room admits more trades on the heaviest-issuance
+    day (12/18). Net: +0.07 Sharpe, −$3.6M worst-case DD,
+    +$0.10M monthly h20 P&L.
 - **Hedge ratio**: **0.60 × β** (portfolio-Sharpe optimum from
   the hedge-ratio sweep below). Earlier 0.85 came from a
   single-trade min-var analysis (`block-alpha-drivers.md`) —
@@ -266,28 +273,30 @@ as the natural data foundation for any future
 
 ### Monthly rollup (window=20d)
 
-Headline numbers on the production default: 273 trades, 29
+Headline numbers on the production default: 236 trades, 29
 months, hedge ratio 0.60, **r0 stop −2% (MOC exit on trade
 date)**, **hedged-P&L stop −10%** (T+1 close after trigger),
 **portfolio GMV cap $500M with scale-down on partial fills**,
-**bank filter (0.5× JPM/MS, 1.5× Citi, applied pre-clip
-through `sizer.size_position`)**, 10 bps × 4 sides transaction
-costs, 30% deal-size sizer cap, portfolio VaR at ρ=0.3.
+**bank filter (0.5× JPM/MS, 1.5× Citi)**, **sector filter
+(skip Real Estate, Health Care, Utilities)**, 10 bps × 4
+sides transaction costs, 30% deal-size sizer cap, portfolio
+VaR at ρ=0.3.
 
 | metric | value |
 |---|---|
-| **avg daily gross GMV** | **$249M** |
+| **avg daily gross GMV** | **$229M** |
 | max daily gross GMV | $500M (cap-bound) |
 | avg daily portfolio VaR (ρ=0.30) | **$16M** |
-| avg monthly P&L hedged (h20) | **+$3.5M** |
-| avg monthly h10 P&L | +$2.1M |
-| avg monthly max drawdown | **−$6.4M** |
-| worst-month max drawdown | **−$20.9M** |
-| **Sharpe (hedged, annualized)** | **+1.68** |
-| r0 cuts | 46/273 (17%) |
-| hedged stops | 17/273 (6%) |
-| cap zero-capacity skips | 10/273 |
-| cap partial fills | 11/273 |
+| avg monthly P&L hedged (h20) | **+$3.6M** |
+| avg monthly h10 P&L | +$2.2M |
+| avg monthly max drawdown | **−$6.2M** |
+| worst-month max drawdown | **−$24.5M** |
+| **Sharpe (hedged, annualized)** | **+1.75** |
+| r0 cuts | 38/236 (16%) |
+| hedged stops | 16/236 (7%) |
+| cap zero-capacity skips | 5/236 |
+| cap partial fills | 8/236 |
+| sector-filter skips | 37 (RE, HC, UTIL) |
 
 **Diversification band**: at ρ=0.1 (highly orthogonal
 hedged residuals) portfolio VaR is **$16.9M (54% of sum)**;

@@ -42,7 +42,7 @@ from app.services.portfolio.caps import (
     apply_caps_scaled,
 )
 from app.services.portfolio.expected import compute_expected
-from app.services.portfolio.filters import bank_filter
+from app.services.portfolio.filters import bank_filter, sector_filter
 from app.services.portfolio.position import (
     DEFAULT_COST_BPS,
     DEFAULT_HEDGE_RATIO,
@@ -161,6 +161,7 @@ def run(
     cost_bps_per_side: float = DEFAULT_COST_BPS,
     stop_basis: str = DEFAULT_STOP_BASIS,
     bank_filter_fn=bank_filter,
+    sector_filter_fn=sector_filter,
 ) -> tuple[pl.DataFrame, dict[int, pl.DataFrame]]:
     trades = pl.read_parquet('data/backtest_trades.parquet')
     scores = pl.read_parquet('data/backtest_scores.parquet')
@@ -169,6 +170,13 @@ def run(
 
     trades = join_pre_returns(trades, scores)
     trades = attach_combined_beta(trades, baskets)
+
+    # Attach GICS sector (post-overrides) for strategy filters.
+    refs = pl.read_parquet(latest('refs')).select([
+        pl.col('symbol'),
+        pl.col('g_sector').alias('sector'),
+    ])
+    trades = trades.join(refs, on='symbol', how='left')
 
     # Sampling
     selected = sample_trades(
@@ -197,11 +205,13 @@ def run(
             skipped['no_basket'] += 1
             continue
 
-        # Strategy filter: per-broker multiplier. Passed to
-        # size_position as a pre-clip multiplier so the hard
-        # caps (position $cap, deal_pct, VaR cap) still bind on
-        # upsized trades.
+        # Strategy filters: per-broker and per-sector
+        # multipliers. Passed to size_position as a pre-clip
+        # multiplier so the hard caps (position $cap, deal_pct,
+        # VaR cap) still bind on upsized trades.
         bank_mult = bank_filter_fn(tr.get('broker'))
+        if sector_filter_fn is not None:
+            bank_mult *= sector_filter_fn(tr.get('sector'))
         notional = size_position(
             adv_usd or 0,
             size_params,
@@ -264,7 +274,7 @@ def run(
             row['combined_corr'] = rho
             row['registered'] = tr.get('registered')
             row['broker'] = tr.get('broker')
-            row['sector'] = None  # joined later if needed
+            row['sector'] = tr.get('sector')
             if exp:
                 row.update({
                     'expected_return_unhedged':
@@ -376,6 +386,7 @@ def main() -> None:
     cost_bps = DEFAULT_COST_BPS  # 10 bps/side
     stop_basis = DEFAULT_STOP_BASIS  # 'hedged'
     bank_filter_fn = bank_filter
+    sector_filter_fn = sector_filter
 
     while args:
         flag = args.pop(0)
@@ -415,6 +426,11 @@ def main() -> None:
         elif flag == '--no-bank-filter':
             from app.services.portfolio.filters import no_filter
             bank_filter_fn = no_filter
+        elif flag == '--no-sector-filter':
+            from app.services.portfolio.filters import (
+                no_sector_filter,
+            )
+            sector_filter_fn = no_sector_filter
         else:
             print(f'unknown arg: {flag}', file=sys.stderr)
             sys.exit(1)
@@ -440,6 +456,7 @@ def main() -> None:
         cost_bps_per_side=cost_bps,
         stop_basis=stop_basis,
         bank_filter_fn=bank_filter_fn,
+        sector_filter_fn=sector_filter_fn,
     )
     if positions.is_empty():
         sys.exit(1)
