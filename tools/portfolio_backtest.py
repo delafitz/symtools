@@ -381,7 +381,7 @@ def main() -> None:
     seed = 42
     pct_adv = 0.15
     floor_usd = 10_000_000
-    cap_usd = 100_000_000
+    cap_usd = 75_000_000
     var_cap_usd: float | None = 50_000_000  # soft cap; ~5% of trades clipped
     hedge_ratio = DEFAULT_HEDGE_RATIO
     stop_pct = DEFAULT_STOP_PCT  # -0.10 by default

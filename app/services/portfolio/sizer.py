@@ -16,7 +16,7 @@ DAILY_ANN = 252 ** 0.5 * 100  # vol stored as annualized %
 class SizeParams:
     pct_adv: float = 0.15
     floor_usd: float = 10_000_000
-    cap_usd: float = 100_000_000
+    cap_usd: float = 75_000_000
     # Soft cap on hedged 99% VaR per position. Set to None
     # to disable. Default $50M is permissive — caps only the
     # extreme-vol outliers (~5% of trades) at a tiny return

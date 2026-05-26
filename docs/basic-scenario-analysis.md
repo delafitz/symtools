@@ -20,7 +20,7 @@ notional_$ = clip(pct_adv × adv_usd_30d, floor, cap)
 |---|---|
 | `pct_adv` | 0.15 |
 | `floor` | $10M |
-| `cap` | $100M |
+| `cap` | $75M |
 | `var_cap_usd` | **$50M** (soft cap on hedged 99% VaR @ 20d) |
 | `deal_pct` | **0.30** (max position as fraction of deal size) |
 
@@ -28,7 +28,7 @@ ADV is the 30-day trailing average dollar volume at trade
 date, taken from `backtest_trades.parquet`. With these defaults
 the average target notional is **$20.5M** (median $13.5M; ~40%
 of trades hit the floor for small-ADV names, ~1% hit the
-$100M cap; ~4% are clipped by the 30%-of-deal cap).
+$75M cap; ~4% are clipped by the 30%-of-deal cap).
 
 The **$50M VaR cap** is a soft risk-mgmt guardrail. It clips
 notional further only on positions whose implied hedged
@@ -76,6 +76,19 @@ concentration — *not* a return-improvement lever.
     cohort that survives day 1 but trips this threshold later.
     On the current dataset adds essentially zero Sharpe over
     r0-only but provides a hard loss cap for tail regimes.
+- **Profit take (+20%, 3-day scale-out)** (`app/services/
+  portfolio/position.py:DEFAULT_PROFIT_TAKE_PCT`): walks the
+  same T+1..T+(w−3) window; if cumulative hedged net return
+  crosses +20%, exit via 1/3 ramp at the next three trading-
+  day closes instead of riding to the planned T+(w−2)..T+w
+  ramp. Models realistic "lock in big wins early" behavior.
+  Fires on 13/235 trades (6%) — heavily concentrated in the
+  chase_d10 momentum-winner tail. Sharpe lift over no-PT:
+  +0.20 (+1.91 → +2.11 at $100M cap; +1.84 at $75M cap).
+  Almost all of the Sharpe lift comes from drawdown
+  reduction (worst-month −$23.6M → −$15.2M / −$19.4M at the
+  two cap levels) — winners stop retracing rather than h20
+  P&L expanding.
 - **Portfolio GMV cap** (`app/services/portfolio/caps.py`):
   $500M aggregate gross notional. New trades that would
   breach the cap take a **partial fill** (size scaled to fit
@@ -86,7 +99,7 @@ concentration — *not* a return-improvement lever.
   monthly P&L.
 - **Strategy filters** (`app/services/portfolio/filters.py`):
   per-trade notional multipliers passed to `size_position(...,
-  pre_clip_mult=...)` so the per-position cap ($100M),
+  pre_clip_mult=...)` so the per-position cap ($75M),
   deal_pct cap (30%), and VaR cap ($50M) all still bind on
   upsized trades.
   - *Bank filter*: 0.5× for JPM and MS (h20 hedged means
@@ -103,6 +116,14 @@ concentration — *not* a return-improvement lever.
     GMV-cap room admits more trades on the heaviest-issuance
     day (12/18). Net: +0.07 Sharpe, −$3.6M worst-case DD,
     +$0.10M monthly h20 P&L.
+  - *Flow filter (chase_d10)*: upsize 1.5× when pre_20d > +10%
+    AND pre_1d > 0%. Identifies trades where the rally is
+    actively continuing into the block — 29% of book qualifies,
+    with cohort mean h20 +1.70% (vs +0.31% for the rest).
+    Lifts Sharpe +1.75 → +1.91 (without PT). Trades land in
+    pro-cyclical big-ADV names (Industrials, Cons Disc,
+    Financials) — exactly the cohort where the +20% PT then
+    fires.
 - **Hedge ratio**: **0.60 × β** (portfolio-Sharpe optimum from
   the hedge-ratio sweep below). Earlier 0.85 came from a
   single-trade min-var analysis (`block-alpha-drivers.md`) —
@@ -273,29 +294,33 @@ as the natural data foundation for any future
 
 ### Monthly rollup (window=20d)
 
-Headline numbers on the production default: 236 trades, 29
-months, hedge ratio 0.60, **r0 stop −2% (MOC exit on trade
-date)**, **hedged-P&L stop −10%** (T+1 close after trigger),
-**portfolio GMV cap $500M with scale-down on partial fills**,
-**bank filter (0.5× JPM/MS, 1.5× Citi)**, **sector filter
-(skip Real Estate, Health Care, Utilities)**, 10 bps × 4
-sides transaction costs, 30% deal-size sizer cap, portfolio
-VaR at ρ=0.3.
+Headline numbers on the production default: 235 trades, 29
+months, hedge ratio 0.60, **per-position cap $75M**, **r0
+stop −2% (MOC exit on trade date)**, **hedged-P&L stop −10%**
+(T+1 close after trigger), **+20% profit-take with 3-day
+scale-out ramp**, **portfolio GMV cap $500M with scale-down
+on partial fills**, **bank filter (0.5× JPM/MS, 1.5× Citi)**,
+**sector filter (skip Real Estate, Health Care, Utilities)**,
+**chase_d10 (pre_20d > +10% AND pre_1d > 0% → 1.5×)**, 10 bps
+× 4 sides transaction costs, 30% deal-size sizer cap,
+portfolio VaR at ρ=0.3.
 
 | metric | value |
 |---|---|
-| **avg daily gross GMV** | **$229M** |
+| **avg daily gross GMV** | **$213M** |
 | max daily gross GMV | $500M (cap-bound) |
-| avg daily portfolio VaR (ρ=0.30) | **$16M** |
-| avg monthly P&L hedged (h20) | **+$3.6M** |
-| avg monthly h10 P&L | +$2.2M |
-| avg monthly max drawdown | **−$6.2M** |
-| worst-month max drawdown | **−$24.5M** |
-| **Sharpe (hedged, annualized)** | **+1.75** |
-| r0 cuts | 38/236 (16%) |
-| hedged stops | 16/236 (7%) |
-| cap zero-capacity skips | 5/236 |
-| cap partial fills | 8/236 |
+| avg daily portfolio VaR (ρ=0.30) | **$14M** |
+| avg monthly P&L hedged (h20) | **+$3.2M** |
+| avg monthly h10 P&L | +$2.0M |
+| avg monthly max drawdown | **−$5.5M** |
+| worst-month max drawdown | **−$19.4M** |
+| **Sharpe (hedged, annualized)** | **+1.84** |
+| r0 cuts | 38/235 (16%) |
+| hedged stops | 16/235 (7%) |
+| profit_take fires | 13/235 (6%) |
+| trades at $75M position cap | 14/235 |
+| cap zero-capacity skips | 6/235 |
+| cap partial fills | 6/235 |
 | sector-filter skips | 37 (RE, HC, UTIL) |
 
 **Diversification band**: at ρ=0.1 (highly orthogonal
