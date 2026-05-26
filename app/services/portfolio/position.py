@@ -52,6 +52,13 @@ DEFAULT_R0_STOP_PCT = -0.02
 # on ~12% of trades and adds essentially zero Sharpe over
 # r0-only, but provides a real loss cap for tail scenarios.
 DEFAULT_STOP_PCT = -0.10
+# Profit-take threshold (hedged). If cumulative hedged net
+# return reaches this during T+1..T+(w-3), trigger a 3-day
+# scale-out at the next 3 trading-day closes instead of
+# riding to the planned end-of-window ramp. Models the
+# realistic "lock in big wins early" behavior. Disabled when
+# None.
+DEFAULT_PROFIT_TAKE_PCT: float | None = 0.20
 DEFAULT_STOP_BASIS = 'hedged'  # 'hedged' or 'target'
 # Round-trip transaction cost per side (bps). Charged on
 # target entry, target exit, hedge entry, hedge exit — so the
@@ -99,6 +106,10 @@ class PositionResult:
     stop_basis: str
     stop_triggered: bool
     stop_day: str | None
+    # Profit-take diagnostics (set when the +X% scale-out
+    # ramp is triggered mid-window).
+    profit_take_triggered: bool = False
+    profit_take_day: str | None = None
 
 
 def _ramp_dates(
@@ -145,6 +156,7 @@ def score_position(
     hedge_ratio: float = DEFAULT_HEDGE_RATIO,
     stop_pct: float = DEFAULT_STOP_PCT,
     r0_stop_pct: float = DEFAULT_R0_STOP_PCT,
+    profit_take_pct: float | None = DEFAULT_PROFIT_TAKE_PCT,
     cost_bps_per_side: float = DEFAULT_COST_BPS,
     stop_basis: str = DEFAULT_STOP_BASIS,
 ) -> PositionResult | None:
@@ -241,6 +253,29 @@ def score_position(
                 stop_triggered = True
                 break
 
+    # Profit-take: walks the same pre_ramp window. If cumulative
+    # hedged net return crosses +profit_take_pct, exit via a
+    # 3-day scale-out at the next 3 trading-day closes (rather
+    # than letting the position drift back).
+    profit_take_triggered = False
+    profit_take_day: str | None = None
+    if not stop_triggered and profit_take_pct is not None:
+        shares_marked = notional_usd / offer_price
+        for r in pre_ramp.iter_rows(named=True):
+            d = r['date']
+            t_close = r['close']
+            b_close = _close_on(basket_close, d)
+            if b_close is None:
+                continue
+            t_pnl = shares_marked * (t_close - offer_price)
+            b_ret = b_close / basket_entry - 1
+            h_pnl = -hedge_notional * b_ret
+            net_ret = (t_pnl + h_pnl) / notional_usd
+            if net_ret >= profit_take_pct:
+                profit_take_day = d
+                profit_take_triggered = True
+                break
+
     if stop_triggered:
         # R0 stop (stop_day == trade_date): exit market-on-close
         # of the trade date itself. The r0 signal is observable
@@ -279,6 +314,31 @@ def score_position(
         exit_dates = [ex_date]
         exit_target_pxs = [ex_t_px]
         exit_basket_pxs = [ex_b]
+    elif profit_take_triggered:
+        # 3-day scale-out starting next session after the
+        # profit-take signal. Lock in winners; don't ride them
+        # back. If we run out of forward bars (signal late in
+        # window), fall through to the planned ramp instead.
+        ramp_dates = (
+            target_daily
+            .filter(pl.col('date') > profit_take_day)
+            .head(RAMP_DAYS)
+            .get_column('date')
+            .to_list()
+        )
+        if len(ramp_dates) < RAMP_DAYS:
+            exit_dates = list(planned_ramp)
+        else:
+            exit_dates = ramp_dates
+        exit_target_pxs = []
+        exit_basket_pxs = []
+        for d in exit_dates:
+            t_px = _close_on(target_daily, d)
+            b_px = _close_on(basket_close, d)
+            if t_px is None or b_px is None:
+                return None
+            exit_target_pxs.append(t_px)
+            exit_basket_pxs.append(b_px)
     else:
         # Planned ramp: 1/3 each of last RAMP_DAYS
         exit_dates = []
@@ -341,4 +401,6 @@ def score_position(
         stop_basis=stop_basis,
         stop_triggered=stop_triggered,
         stop_day=stop_day,
+        profit_take_triggered=profit_take_triggered,
+        profit_take_day=profit_take_day,
     )

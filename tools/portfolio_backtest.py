@@ -156,12 +156,14 @@ def run(
     hedge_ratio: float,
     stop_pct: float,
     r0_stop_pct: float | None = None,
+    profit_take_pct: float | None = 0.20,
     max_gmv_usd: float | None = None,
     max_pos: int | None = None,
     cost_bps_per_side: float = DEFAULT_COST_BPS,
     stop_basis: str = DEFAULT_STOP_BASIS,
     bank_filter_fn=bank_filter,
     sector_filter_fn=sector_filter,
+    flow_filter_fn=None,
 ) -> tuple[pl.DataFrame, dict[int, pl.DataFrame]]:
     trades = pl.read_parquet('data/backtest_trades.parquet')
     scores = pl.read_parquet('data/backtest_scores.parquet')
@@ -212,6 +214,8 @@ def run(
         bank_mult = bank_filter_fn(tr.get('broker'))
         if sector_filter_fn is not None:
             bank_mult *= sector_filter_fn(tr.get('sector'))
+        if flow_filter_fn is not None:
+            bank_mult *= flow_filter_fn(tr)
         notional = size_position(
             adv_usd or 0,
             size_params,
@@ -252,6 +256,7 @@ def run(
                 hedge_ratio=hedge_ratio,
                 stop_pct=stop_pct,
                 r0_stop_pct=r0_stop_pct,
+                profit_take_pct=profit_take_pct,
                 cost_bps_per_side=cost_bps_per_side,
                 stop_basis=stop_basis,
             )
