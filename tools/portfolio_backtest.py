@@ -42,6 +42,7 @@ from app.services.portfolio.caps import (
     apply_caps_scaled,
 )
 from app.services.portfolio.expected import compute_expected
+from app.services.portfolio.filters import bank_filter
 from app.services.portfolio.position import (
     DEFAULT_COST_BPS,
     DEFAULT_HEDGE_RATIO,
@@ -202,6 +203,10 @@ def run(
             corr=rho,
             deal_size_usd=tr.get('deal_size'),
         )
+        # Strategy filter: half-size bad banks (JPM, MS),
+        # upsize Citi. Applied BEFORE the GMV cap so the cap
+        # operates on the strategy-adjusted intended book.
+        notional *= bank_filter(tr.get('broker'))
         if notional <= 0:
             skipped['no_size'] += 1
             continue

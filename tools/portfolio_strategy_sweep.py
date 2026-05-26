@@ -59,24 +59,28 @@ DOLLAR_COLS = [
     'var99_unhedged_usd', 'var99_hedged_usd',
 ]
 
-BAD_BANKS = {'MS', 'BAC', 'BAML', 'JPM'}
+# Refreshed on the 283-trade cleaned population with sector
+# overrides applied (see app/services/sector_overrides.py) and
+# Tech+Comm merged. h20 means below from `lens_report.py` on
+# the current backtest_scores.
+BAD_BANKS = {'JPM', 'MS'}  # h20 −0.9% / 0.0% respectively
 
-# Sectors from block-alpha-drivers.md sector lens (20d hedged).
-# IT is excluded from penalties: too big and internally diverse
-# (semis / software / hardware / IT services all have different
-# block dynamics) to treat as a single bad cohort. Penalize only
-# the cleaner negative sectors. Skip only the tiny-n tail.
+# Tech+Comm is excluded from penalties per the "ex tech"
+# policy — too big and structurally diverse to treat as one
+# cohort even though h20 = −1.4% on this dataset.
 BAD_SECTORS = {
-    'Energy',                  # n=51, hedged -0.83%
-    'Real Estate',             # n=27, hedged -0.84%
+    'Energy',       # n=37, h20 −0.2%
+    'Real Estate',  # n=24, h20 −1.3%
+    'Health Care',  # n=14, h20 −0.4%
 }
 SKIPPABLE_SECTORS = {
-    'Communication Services',  # n=7,  hedged -3.39%
-    'Utilities',               # n=3,  hedged -3.34%
+    'Utilities',    # n=4,  h20 −2.8% (tiny-n tail)
 }
 GOOD_SECTORS = {
-    'Consumer Discretionary',  # n=29, hedged +3.85%
-    'Industrials',             # n=57, hedged +2.51%
+    'Materials',             # n=17, h20 +5.8%
+    'Consumer Discretionary',# n=35, h20 +2.1%
+    'Consumer Staples',      # n=13, h20 +1.7%
+    'Industrials',           # n=60, h20 +1.6%
 }
 
 
@@ -85,11 +89,33 @@ def baseline(r: dict) -> float:
 
 
 def half_bad_bank(r: dict) -> float:
+    """0.5x for {JPM, MS} (h20 = −0.9% / 0.0%)."""
     return 0.5 if r.get('broker') in BAD_BANKS else 1.0
 
 
 def skip_bad_bank(r: dict) -> float:
+    """0.0x for {JPM, MS}."""
     return 0.0 if r.get('broker') in BAD_BANKS else 1.0
+
+
+def quarter_bad_bank(r: dict) -> float:
+    """0.25x for {JPM, MS} — heavier penalty than half."""
+    return 0.25 if r.get('broker') in BAD_BANKS else 1.0
+
+
+def half_jpm_only(r: dict) -> float:
+    """0.5x only for JPM (the worst single bank, h20 = −0.9%)."""
+    return 0.5 if r.get('broker') == 'JPM' else 1.0
+
+
+def skip_jpm_only(r: dict) -> float:
+    """0.0x only for JPM."""
+    return 0.0 if r.get('broker') == 'JPM' else 1.0
+
+
+def chase_citi(r: dict) -> float:
+    """1.5x for Citi (best bank, h20 = +3.8%, n=37)."""
+    return 1.5 if r.get('broker') == 'C' else 1.0
 
 
 def skip_panic(r: dict) -> float:
@@ -156,10 +182,17 @@ def _compose(*fns: Callable[[dict], float]) -> Callable[[dict], float]:
 
 STRATEGIES: dict[str, Callable[[dict], float]] = {
     'baseline': baseline,
+    # bank filters (focused)
+    'half_jpm_only': half_jpm_only,
+    'skip_jpm_only': skip_jpm_only,
+    'half_bad_bank': half_bad_bank,      # JPM + MS
+    'quarter_bad_bank': quarter_bad_bank, # JPM + MS at 0.25x
+    'skip_bad_bank': skip_bad_bank,      # JPM + MS skipped
+    'chase_citi': chase_citi,
+    'half_bad_bank+chase_citi': _compose(half_bad_bank, chase_citi),
     # single-axis rules
     'skip_panic': skip_panic,
     'chase_d10': chase_d10,
-    'half_bad_bank': half_bad_bank,
     'half_bad_sector': half_bad_sector,
     'quarter_bad_sector': quarter_bad_sector,
     'skip_tail_sector': skip_tail_sector,
