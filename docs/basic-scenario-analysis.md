@@ -85,13 +85,17 @@ concentration — *not* a return-improvement lever.
   month drawdown 21% (−$34M → −$21M) while preserving 97% of
   monthly P&L.
 - **Strategy filter — bank cohort** (`app/services/portfolio/
-  filters.py`): per-trade notional multiplier applied before
-  the GMV cap. Defaults: 0.5× for JPM and MS (h20 hedged means
-  of −0.9% and 0.0% respectively, n=53 combined), 1.5× for
-  Citi (h20 +3.8%, n=37), 1.0× for everyone else. Lifts
-  portfolio Sharpe from +1.61 (defaults-only) to +1.77; the
-  cap-and-stops still bound aggregate exposure so the upsize
-  on Citi doesn't blow out GMV.
+  filters.py`): per-trade notional multiplier passed to
+  `size_position(..., pre_clip_mult=...)` so the per-position
+  cap ($100M), deal_pct cap (30%), and VaR cap ($50M) all
+  still bind on upsized trades. Defaults: 0.5× for JPM and MS
+  (h20 hedged means of −0.9% and 0.0% respectively, n=53
+  combined), 1.5× for Citi (h20 +3.8%, n=37), 1.0× for
+  everyone else. Lifts portfolio Sharpe from +1.61 (defaults-
+  only) to +1.68. Most of the lift comes from the JPM/MS
+  shrink freeing GMV-cap headroom for other trades (n goes
+  265 → 273); chase_citi adds an additional +$0.20M monthly
+  P&L on top.
 - **Hedge ratio**: **0.60 × β** (portfolio-Sharpe optimum from
   the hedge-ratio sweep below). Earlier 0.85 came from a
   single-trade min-var analysis (`block-alpha-drivers.md`) —
@@ -262,28 +266,28 @@ as the natural data foundation for any future
 
 ### Monthly rollup (window=20d)
 
-Headline numbers on the production default: 275 trades, 29
+Headline numbers on the production default: 273 trades, 29
 months, hedge ratio 0.60, **r0 stop −2% (MOC exit on trade
 date)**, **hedged-P&L stop −10%** (T+1 close after trigger),
 **portfolio GMV cap $500M with scale-down on partial fills**,
-**bank filter (0.5× JPM/MS, 1.5× Citi)**, 10 bps × 4 sides
-transaction costs, 30% deal-size sizer cap, portfolio VaR at
-ρ=0.3.
+**bank filter (0.5× JPM/MS, 1.5× Citi, applied pre-clip
+through `sizer.size_position`)**, 10 bps × 4 sides transaction
+costs, 30% deal-size sizer cap, portfolio VaR at ρ=0.3.
 
 | metric | value |
 |---|---|
-| **avg daily gross GMV** | **$247M** |
+| **avg daily gross GMV** | **$249M** |
 | max daily gross GMV | $500M (cap-bound) |
 | avg daily portfolio VaR (ρ=0.30) | **$16M** |
-| avg monthly P&L hedged (h20) | **+$3.9M** |
-| avg monthly h10 P&L | +$2.4M |
-| avg monthly max drawdown | **−$6.6M** |
-| worst-month max drawdown | **−$22.0M** |
-| **Sharpe (hedged, annualized)** | **+1.77** |
-| r0 cuts | 47/275 (17%) |
-| hedged stops | 17/275 (6%) |
-| cap zero-capacity skips | 8/275 |
-| cap partial fills | 9/275 |
+| avg monthly P&L hedged (h20) | **+$3.5M** |
+| avg monthly h10 P&L | +$2.1M |
+| avg monthly max drawdown | **−$6.4M** |
+| worst-month max drawdown | **−$20.9M** |
+| **Sharpe (hedged, annualized)** | **+1.68** |
+| r0 cuts | 46/273 (17%) |
+| hedged stops | 17/273 (6%) |
+| cap zero-capacity skips | 10/273 |
+| cap partial fills | 11/273 |
 
 **Diversification band**: at ρ=0.1 (highly orthogonal
 hedged residuals) portfolio VaR is **$16.9M (54% of sum)**;

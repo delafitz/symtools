@@ -160,6 +160,7 @@ def run(
     max_pos: int | None = None,
     cost_bps_per_side: float = DEFAULT_COST_BPS,
     stop_basis: str = DEFAULT_STOP_BASIS,
+    bank_filter_fn=bank_filter,
 ) -> tuple[pl.DataFrame, dict[int, pl.DataFrame]]:
     trades = pl.read_parquet('data/backtest_trades.parquet')
     scores = pl.read_parquet('data/backtest_scores.parquet')
@@ -196,17 +197,19 @@ def run(
             skipped['no_basket'] += 1
             continue
 
+        # Strategy filter: per-broker multiplier. Passed to
+        # size_position as a pre-clip multiplier so the hard
+        # caps (position $cap, deal_pct, VaR cap) still bind on
+        # upsized trades.
+        bank_mult = bank_filter_fn(tr.get('broker'))
         notional = size_position(
             adv_usd or 0,
             size_params,
             vol_90d_annual_pct=vol,
             corr=rho,
             deal_size_usd=tr.get('deal_size'),
+            pre_clip_mult=bank_mult,
         )
-        # Strategy filter: half-size bad banks (JPM, MS),
-        # upsize Citi. Applied BEFORE the GMV cap so the cap
-        # operates on the strategy-adjusted intended book.
-        notional *= bank_filter(tr.get('broker'))
         if notional <= 0:
             skipped['no_size'] += 1
             continue
@@ -372,6 +375,7 @@ def main() -> None:
     max_pos: int | None = DEFAULT_MAX_POS
     cost_bps = DEFAULT_COST_BPS  # 10 bps/side
     stop_basis = DEFAULT_STOP_BASIS  # 'hedged'
+    bank_filter_fn = bank_filter
 
     while args:
         flag = args.pop(0)
@@ -408,6 +412,9 @@ def main() -> None:
             cost_bps = float(args.pop(0))
         elif flag == '--stop-basis':
             stop_basis = args.pop(0)
+        elif flag == '--no-bank-filter':
+            from app.services.portfolio.filters import no_filter
+            bank_filter_fn = no_filter
         else:
             print(f'unknown arg: {flag}', file=sys.stderr)
             sys.exit(1)
@@ -432,6 +439,7 @@ def main() -> None:
         max_pos=max_pos,
         cost_bps_per_side=cost_bps,
         stop_basis=stop_basis,
+        bank_filter_fn=bank_filter_fn,
     )
     if positions.is_empty():
         sys.exit(1)

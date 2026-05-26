@@ -39,6 +39,7 @@ def size_position(
     vol_90d_annual_pct: float | None = None,
     corr: float | None = None,
     deal_size_usd: float | None = None,
+    pre_clip_mult: float = 1.0,
 ) -> float:
     """Notional $ for one position.
 
@@ -50,10 +51,17 @@ def size_position(
     When `deal_size_usd` is provided, the position is also
     capped at `params.deal_pct × deal_size_usd` — you can't
     take more of the block than the broker is selling.
+
+    `pre_clip_mult` scales the raw `pct_adv × ADV` target
+    BEFORE the global cap/floor/VaR/deal-pct clips are
+    applied, so strategy filters (e.g. bank or sector
+    multipliers) cannot push a position past the hard caps.
     """
     if not adv_usd or adv_usd <= 0:
         return 0.0
-    raw = params.pct_adv * adv_usd
+    if pre_clip_mult <= 0:
+        return 0.0
+    raw = params.pct_adv * adv_usd * pre_clip_mult
     notional = max(params.floor_usd, min(params.cap_usd, raw))
 
     if (

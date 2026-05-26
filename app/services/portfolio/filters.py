@@ -37,3 +37,37 @@ def bank_filter(broker: str | None) -> float:
     JPM/MS: 0.5 · Citi: 1.5 · everything else: 1.0.
     """
     return half_bad_bank(broker) * chase_citi(broker)
+
+
+def no_filter(broker: str | None) -> float:
+    return 1.0
+
+
+def half_jpm_only(broker: str | None) -> float:
+    return 0.5 if broker == 'JPM' else 1.0
+
+
+def skip_jpm_only(broker: str | None) -> float:
+    return 0.0 if broker == 'JPM' else 1.0
+
+
+def quarter_bad_bank(broker: str | None) -> float:
+    return 0.25 if broker in BAD_BANKS else 1.0
+
+
+def skip_bad_bank(broker: str | None) -> float:
+    return 0.0 if broker in BAD_BANKS else 1.0
+
+
+# Variant registry keyed by short name. Used by the bank-filter
+# sweep in `tools/portfolio_bank_sweep.py`.
+BANK_FILTER_VARIANTS: dict[str, object] = {
+    'baseline': no_filter,
+    'half_jpm_only': half_jpm_only,
+    'skip_jpm_only': skip_jpm_only,
+    'half_bad_bank': half_bad_bank,
+    'quarter_bad_bank': quarter_bad_bank,
+    'skip_bad_bank': skip_bad_bank,
+    'chase_citi': chase_citi,
+    'half_bad_bank+chase_citi': bank_filter,
+}
