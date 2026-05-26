@@ -36,10 +36,16 @@ from app.services.portfolio.aggregator import (
     monthly_aggregate,
     portfolio_summary,
 )
+from app.services.portfolio.caps import (
+    DEFAULT_MAX_GMV_USD,
+    DEFAULT_MAX_POS,
+    apply_caps_scaled,
+)
 from app.services.portfolio.expected import compute_expected
 from app.services.portfolio.position import (
     DEFAULT_COST_BPS,
     DEFAULT_HEDGE_RATIO,
+    DEFAULT_R0_STOP_PCT,
     DEFAULT_STOP_BASIS,
     DEFAULT_STOP_PCT,
     score_position,
@@ -148,6 +154,9 @@ def run(
     size_params: SizeParams,
     hedge_ratio: float,
     stop_pct: float,
+    r0_stop_pct: float | None = None,
+    max_gmv_usd: float | None = None,
+    max_pos: int | None = None,
     cost_bps_per_side: float = DEFAULT_COST_BPS,
     stop_basis: str = DEFAULT_STOP_BASIS,
 ) -> tuple[pl.DataFrame, dict[int, pl.DataFrame]]:
@@ -224,6 +233,7 @@ def run(
                 window_d=w,
                 hedge_ratio=hedge_ratio,
                 stop_pct=stop_pct,
+                r0_stop_pct=r0_stop_pct,
                 cost_bps_per_side=cost_bps_per_side,
                 stop_basis=stop_basis,
             )
@@ -273,6 +283,30 @@ def run(
         f'portfolio: {len(positions)} position-window rows; '
         f'skipped={skipped}'
     )
+
+    # Portfolio-level caps (chronological, per window). Applied
+    # AFTER per-trade scoring — scales down dollar fields of new
+    # trades that would breach the GMV cap; binary-skips trades
+    # that would breach the position cap. See app/services/
+    # portfolio/caps.py for the policy.
+    if max_gmv_usd is not None or max_pos is not None:
+        capped_parts = []
+        stats_log: list[tuple[int, dict]] = []
+        for w in WINDOWS:
+            sub = positions.filter(pl.col('window_d') == w)
+            kept, stats = apply_caps_scaled(
+                sub, max_pos=max_pos, max_gmv_usd=max_gmv_usd,
+            )
+            capped_parts.append(kept)
+            stats_log.append((w, stats))
+        positions = pl.concat(capped_parts)
+        for w, s in stats_log:
+            log.info(
+                f'caps w={w}: full={s["full"]} '
+                f'partial={s["partial"]} zero={s["zero_capacity"]} '
+                f'skipped_pos={s["skipped_pos"]} '
+                f'(of {s["total"]})'
+            )
 
     monthly: dict[int, pl.DataFrame] = {}
     for w in WINDOWS:
@@ -327,7 +361,10 @@ def main() -> None:
     cap_usd = 100_000_000
     var_cap_usd: float | None = 50_000_000  # soft cap; ~5% of trades clipped
     hedge_ratio = DEFAULT_HEDGE_RATIO
-    stop_pct = DEFAULT_STOP_PCT  # -0.08 by default
+    stop_pct = DEFAULT_STOP_PCT  # -0.10 by default
+    r0_stop_pct: float | None = DEFAULT_R0_STOP_PCT
+    max_gmv_usd: float | None = DEFAULT_MAX_GMV_USD
+    max_pos: int | None = DEFAULT_MAX_POS
     cost_bps = DEFAULT_COST_BPS  # 10 bps/side
     stop_basis = DEFAULT_STOP_BASIS  # 'hedged'
 
@@ -353,6 +390,15 @@ def main() -> None:
             hedge_ratio = float(args.pop(0))
         elif flag == '--stop':
             stop_pct = float(args.pop(0))
+        elif flag == '--r0-stop':
+            v = args.pop(0)
+            r0_stop_pct = None if v == 'none' else float(v)
+        elif flag == '--gmv-cap':
+            v = args.pop(0)
+            max_gmv_usd = None if v == 'none' else float(v)
+        elif flag == '--pos-cap':
+            v = args.pop(0)
+            max_pos = None if v == 'none' else int(v)
         elif flag == '--cost-bps':
             cost_bps = float(args.pop(0))
         elif flag == '--stop-basis':
@@ -376,6 +422,9 @@ def main() -> None:
         size_params=size_params,
         hedge_ratio=hedge_ratio,
         stop_pct=stop_pct,
+        r0_stop_pct=r0_stop_pct,
+        max_gmv_usd=max_gmv_usd,
+        max_pos=max_pos,
         cost_bps_per_side=cost_bps,
         stop_basis=stop_basis,
     )

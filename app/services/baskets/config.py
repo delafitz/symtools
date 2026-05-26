@@ -66,8 +66,12 @@ MIN_SINGLE_REL_CAP: float = 0.10  # 10% of target
 
 # SCIP MIP solver time limit in seconds.
 # Cardinality constraints make this a mixed-integer program.
-# 5s is usually sufficient; complex problems may hit the limit.
-SOLVER_TIME_LIMIT: float = 5.0
+# 10s is usually sufficient and gives reproducible results across
+# cold-cache rebuilds; at the prior 5s default, ~12% of trades
+# would land on different local optima between runs (~0.5 Sharpe
+# of variance in the portfolio backtest). 10s closes most of
+# that gap while keeping cold backtests under ~40min wall-clock.
+SOLVER_TIME_LIMIT: float = 10.0
 
 # Weight filter threshold for output.
 # Weights below this are treated as zero (numerical noise).

@@ -107,7 +107,6 @@ def _load_alt(path: Path) -> pl.DataFrame | None:
             'symbol': sym,
             'price_date': r.get('price_date'),
             'trade_date': r.get('trade_date'),
-            'intraday': bool(r.get('intraday', False)),
             'offer_price': adj_p,
             'shares': adj_s,
             'registered': r.get('type') == 'Reg',
@@ -124,13 +123,15 @@ def _rebuild_discount(
 ) -> pl.DataFrame:
     """Compute discount from offer_price and pre-block close.
 
-    Rule:
-      - intraday == False: pre_close = close on price_date
-        (block priced after close; that day's close is the
-        last quote before pricing)
-      - intraday == True:  pre_close = close strictly before
-        price_date (block priced during the trading day;
-        the prior session's close is the reference quote)
+    Rule: pre_close = close on price_date (uniform across all
+    trades). The source's `price_date` is the day the offer was
+    set; its closing price is the natural reference quote.
+
+    Source as of 2026-05-22 no longer carries an `intraday`
+    flag — overnight blocks have trade_date == price_date + 1,
+    intraday/same-day blocks have trade_date == price_date.
+    Either way, close on price_date is the right pre-block
+    reference under this convention.
 
     Rows with no usable pre_close, positive discount, or
     |discount| > MAX_DISC are dropped. Adds `discount` and
@@ -162,14 +163,7 @@ def _rebuild_discount(
         if sym_hist.is_empty():
             pre_closes.append(None)
             continue
-        if r.get('intraday'):
-            rows = sym_hist.filter(
-                pl.col('date') < px
-            ).tail(1)
-        else:
-            rows = sym_hist.filter(
-                pl.col('date') <= px
-            ).tail(1)
+        rows = sym_hist.filter(pl.col('date') <= px).tail(1)
         pre_closes.append(
             rows.get_column('close').item() if not rows.is_empty()
             else None
@@ -278,6 +272,19 @@ def load_block_trades(
             'block_trades: no trades after discount filter'
         )
         return None
+
+    # Dedupe on (symbol, trade_date). Source occasionally
+    # records the same block twice with different price_date
+    # interpretations (T-1 overnight vs T intraday). Keeping the
+    # first occurrence is safe — _rebuild_discount has already
+    # normalized them to the same offer/shares.
+    before = len(df)
+    df = df.unique(subset=['symbol', 'trade_date'], keep='first')
+    if len(df) < before:
+        log.warning(
+            f'block_trades: dropped {before - len(df)} duplicate '
+            f'(symbol, trade_date) rows'
+        )
 
     n_trades = len(df)
     n_syms = df['symbol'].n_unique()

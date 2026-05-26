@@ -196,8 +196,15 @@ def pre_return(
     daily: pl.DataFrame, anchor_date: str, n_days: int
 ) -> float | None:
     """Close-to-close return from n_days before anchor up to
-    anchor's close. Measures drift INTO the print."""
-    bars = daily.filter(pl.col('date') <= anchor_date).tail(
+    the last trading day STRICTLY BEFORE anchor's close.
+    Measures drift INTO the print, with the anchor day excluded
+    so intraday blocks (where the block's own price impact lands
+    on the anchor date) don't pollute the pre-trade window.
+
+    For pre_1d: close(anchor-1) / close(anchor-2) − 1.
+    For pre_20d: close(anchor-1) / close(anchor-21) − 1.
+    """
+    bars = daily.filter(pl.col('date') < anchor_date).tail(
         n_days + 1
     )
     if len(bars) < 2:

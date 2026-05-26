@@ -62,13 +62,28 @@ concentration — *not* a return-improvement lever.
 - **Planned exit (both legs)**: ramp 1/3 per day at close on
   T+(w−2), T+(w−1), T+w. The buyer doesn't dump in one print
   to avoid impact.
-- **Stop loss**: triggers when the **daily-marked hedged
-  P&L** falls to `stop_pct × notional`. Both legs liquidate at
-  next day's close. Default `stop_pct = −8%` on a hedged
-  basis. Hedged-P&L basis (vs. target-price basis) means the
-  stop only fires when the hedge has *also* failed to protect
-  the position — see `stop-loss-analysis.md` for the full
-  sweep + comparison.
+- **Two-tier stop loss** (belt-and-suspenders, defaults in
+  `app/services/portfolio/position.py`):
+  - **R0 stop (day-1 MOC cut)**: if close on trade_date / offer
+    − 1 ≤ −2%, exit market-on-close on the trade date itself.
+    The buyer sees the day-1 close, observes the market is
+    rejecting the print, and places an MOC order. Cuts ~16% of
+    trades with the highest continuation-down rate (64% keep
+    falling if held). Sharpe lift over no-stop: +0.31.
+  - **Hedged-P&L backstop (T+1 to T+(w−3))**: walks the
+    holding window; if daily-marked hedged net return ≤ −10%,
+    exit at next session's close. Catches the ~6% slow-burn
+    cohort that survives day 1 but trips this threshold later.
+    On the current dataset adds essentially zero Sharpe over
+    r0-only but provides a hard loss cap for tail regimes.
+- **Portfolio GMV cap** (`app/services/portfolio/caps.py`):
+  $500M aggregate gross notional. New trades that would
+  breach the cap take a **partial fill** (size scaled to fit
+  remaining capacity); existing positions are untouched. Cap
+  binds during heavy issuance bursts (notably Dec 2024 where
+  the uncapped book peaked at $937M GMV) — compresses worst-
+  month drawdown 21% (−$34M → −$21M) while preserving 97% of
+  monthly P&L.
 - **Hedge ratio**: **0.60 × β** (portfolio-Sharpe optimum from
   the hedge-ratio sweep below). Earlier 0.85 came from a
   single-trade min-var analysis (`block-alpha-drivers.md`) —
@@ -239,22 +254,27 @@ as the natural data foundation for any future
 
 ### Monthly rollup (window=20d)
 
-Headline numbers across 29 months (net of 10 bps × 4 sides
-transaction costs, with hedged-P&L stop at −8%, $50M VaR cap,
-30% deal-size cap, hedge ratio 0.60, portfolio VaR at ρ=0.3):
+Headline numbers on the production default: 283 trades, 29
+months, hedge ratio 0.60, **r0 stop −2% (MOC exit on trade
+date)**, **hedged-P&L stop −10%** (T+1 close after trigger),
+**portfolio GMV cap $500M with scale-down on partial fills**,
+10 bps × 4 sides transaction costs, 30% deal-size sizer cap,
+portfolio VaR at ρ=0.3.
 
 | metric | value |
 |---|---|
-| **avg daily gross GMV** | **$330M** |
-| avg daily sum-of-VaRs (hedged, ρ=1) | $31.1M |
-| avg daily portfolio VaR (ρ=0.30) | **$21.0M** |
-| portfolio VaR / gross GMV | 6.4% |
-| diversification benefit at ρ=0.3 | ~33% of sum-of-VaR |
-| avg monthly P&L hedged | **+$2.6M** |
-| avg monthly ret on gross | +1.30% |
-| **annualized return on gross** | **+13.9%** |
-| Sharpe (hedged, annualized) | **+1.52** |
-| n_stops triggered (20d) | ~52 |
+| **avg daily gross GMV** | **$270M** |
+| max daily gross GMV | $500M (cap-bound) |
+| avg daily portfolio VaR (ρ=0.30) | **$17M** |
+| avg monthly P&L hedged (h20) | **+$3.2M** |
+| avg monthly h10 P&L | +$1.9M |
+| avg monthly max drawdown | **−$6.6M** |
+| worst-month max drawdown | **−$21.3M** |
+| **Sharpe (hedged, annualized)** | **+1.61** |
+| r0 cuts | 46/283 (16%) |
+| hedged stops | 17/283 (6%) |
+| cap zero-capacity skips | 18/283 |
+| cap partial fills | 16/283 |
 
 **Diversification band**: at ρ=0.1 (highly orthogonal
 hedged residuals) portfolio VaR is **$16.9M (54% of sum)**;
